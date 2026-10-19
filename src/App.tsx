@@ -59,6 +59,63 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [debug] = useState(() => new URLSearchParams(location.search).has('debug'));
   const [stats, setStats] = useState('');
+  // landscape: 'off' | 'locked' (fullscreen + orientation lock) | 'rotated' (CSS rotate fallback)
+  const [landMode, setLandMode] = useState<'off' | 'locked' | 'rotated'>('off');
+  const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
+  useEffect(() => {
+    const on = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', on);
+    window.addEventListener('orientationchange', on);
+    window.visualViewport?.addEventListener('resize', on);
+    return () => {
+      window.removeEventListener('resize', on);
+      window.removeEventListener('orientationchange', on);
+      window.visualViewport?.removeEventListener('resize', on);
+    };
+  }, []);
+  const physLand = vp.w > vp.h;
+  // never double-rotate: if the phone is physically landscape, drop the CSS rotation
+  const rotated = landMode === 'rotated' && !physLand;
+  const isLand = physLand || rotated;
+  useEffect(() => { if (fwRef.current) fwRef.current.rotated = rotated; }, [rotated]);
+  useEffect(() => {
+    if (landMode === 'rotated' && physLand) setLandMode('off');
+  }, [physLand, landMode]);
+  useEffect(() => {
+    const onFs = () => { if (!document.fullscreenElement && landMode === 'locked') setLandMode('off'); };
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, [landMode]);
+
+  const toggleLandscape = async () => {
+    if (landMode !== 'off') {
+      if (landMode === 'locked') {
+        try { (screen.orientation as ScreenOrientation & { unlock?: () => void }).unlock?.(); } catch { /* ignore */ }
+        if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      }
+      setLandMode('off');
+      return;
+    }
+    const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void> }) | undefined;
+    const root = document.documentElement;
+    if (so?.lock && root.requestFullscreen) {
+      let enteredFs = false;
+      try {
+        await root.requestFullscreen({ navigationUI: 'hide' });
+        enteredFs = true;
+        await so.lock('landscape');
+        setLandMode('locked');
+        return;
+      } catch {
+        if (enteredFs && document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      }
+    }
+    if (physLand) {
+      flash('已是橫向畫面');
+      return;
+    }
+    setLandMode('rotated'); // iOS Safari etc.: rotate the app container 90deg
+  };
 
   useEffect(() => {
     const fw = new Fireworks(canvasRef.current!, sfxRef.current);
@@ -70,9 +127,9 @@ export default function App() {
     fw.start();
     // a gentle welcome burst so the screen isn't empty
     const t = setTimeout(() => {
-      fw.launch(window.innerWidth * 0.5, window.innerHeight * 0.25, 'senrin');
-      setTimeout(() => fw.launch(window.innerWidth * 0.3, window.innerHeight * 0.33, 'senrin'), 500);
-      setTimeout(() => fw.launch(window.innerWidth * 0.72, window.innerHeight * 0.3, 'peony'), 900);
+      fw.launch(fw.W * 0.5, fw.H * 0.25, 'senrin');
+      setTimeout(() => fw.launch(fw.W * 0.3, fw.H * 0.33, 'senrin'), 500);
+      setTimeout(() => fw.launch(fw.W * 0.72, fw.H * 0.3, 'peony'), 900);
     }, 400);
     const onVis = () => (document.hidden ? fw.stop() : fw.start());
     document.addEventListener('visibilitychange', onVis);
@@ -80,6 +137,7 @@ export default function App() {
     const prevent = (e: Event) => e.preventDefault();
     document.addEventListener('gesturestart', prevent);
     document.addEventListener('dblclick', prevent);
+    if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __fw: Fireworks }).__fw = fw;
     let si = 0;
     if (new URLSearchParams(location.search).has('debug')) si = window.setInterval(() => setStats(`${fw.fps} fps · ${fw.particleCount} 粒子`), 500);
     return () => {
@@ -192,7 +250,10 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div
+      className={'app' + (isLand ? ' land' : '') + (rotated ? ' rot' : '')}
+      style={rotated ? { width: vp.h + 'px', height: vp.w + 'px', transform: `translateX(${vp.w}px) rotate(90deg)` } : undefined}
+    >
       <canvas ref={canvasRef} className="stage" />
 
       <div className="top">
@@ -202,6 +263,9 @@ export default function App() {
           </button>
           <button className="pill gold" onClick={ui(() => fwRef.current?.finale())}>
             終章
+          </button>
+          <button className={'pill' + (landMode !== 'off' ? ' on' : '')} onClick={ui(() => void toggleLandscape())}>
+            {landMode !== 'off' ? '直屏' : '橫屏'}
           </button>
         </div>
         <div className="group">

@@ -11,6 +11,17 @@ function hexRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+/** add +-amp random noise to break up 8-bit gradient banding */
+function dither(g: CanvasRenderingContext2D, w: number, h: number, amp: number) {
+  const img = g.getImageData(0, 0, w, h);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() - 0.5) * 2 * amp;
+    d[i] += n; d[i + 1] += n; d[i + 2] += n;
+  }
+  g.putImageData(img, 0, 0);
+}
+
 function makeCanvas(w = 1, h = 1) {
   const c = document.createElement('canvas');
   c.width = Math.max(1, Math.floor(w));
@@ -105,6 +116,7 @@ export class Fireworks {
   private reflc: CanvasRenderingContext2D;
   private sky = makeCanvas();
   private land = makeCanvas();
+  private water = makeCanvas();
 
   W = 1; H = 1; U = 1; dpr = 1;
   landTop = 0; waterY = 0;
@@ -156,6 +168,9 @@ export class Fireworks {
     this.setText('煙火');
     this.resize();
     window.addEventListener('resize', this.resize);
+    window.addEventListener('orientationchange', this.lateResize);
+    window.visualViewport?.addEventListener('resize', this.resize);
+    if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) { this.ro = new ResizeObserver(() => this.resize()); this.ro.observe(canvas.parentElement); }
     canvas.addEventListener('pointerdown', this.onDown);
     canvas.addEventListener('pointermove', this.onMove);
     window.addEventListener('pointerup', this.onUp);
@@ -165,6 +180,9 @@ export class Fireworks {
   destroy() {
     this.stop();
     window.removeEventListener('resize', this.resize);
+    window.removeEventListener('orientationchange', this.lateResize);
+    window.visualViewport?.removeEventListener('resize', this.resize);
+    this.ro?.disconnect();
     this.canvas.removeEventListener('pointerdown', this.onDown);
     this.canvas.removeEventListener('pointermove', this.onMove);
     window.removeEventListener('pointerup', this.onUp);
@@ -183,21 +201,27 @@ export class Fireworks {
     return Math.min(1, this.quality.cap / 5000) * 0.35 + 0.65 * Math.min(1, this.quality.cap / 6500);
   }
 
+  private ro?: ResizeObserver;
+  private lateResize = () => { this.resize(); setTimeout(this.resize, 250); setTimeout(this.resize, 600); };
+
   // ---------- setup ----------
   resize = () => {
-    const W = window.innerWidth;
-    const H = window.innerHeight;
+    // layout size of the container (untransformed, so it is correct when the app is CSS-rotated)
+    const el = this.canvas.parentElement;
+    const W = Math.max(1, Math.round(el && el.clientWidth ? el.clientWidth : window.innerWidth));
+    const H = Math.max(1, Math.round(el && el.clientHeight ? el.clientHeight : window.innerHeight));
+    if (W === this.W && H === this.H && this.quality.dpr === this.dpr && this.canvas.width > 1) return;
     const dpr = this.quality.dpr;
     this.W = W; this.H = H; this.dpr = dpr;
-    this.U = Math.min(W, H * 0.62) / 400;
+    const wide = W > H;
+    this.U = (wide ? Math.min(W * 0.5, H * 0.8) : Math.min(W, H * 0.62)) / 400;
     this.canvas.width = Math.round(W * dpr);
     this.canvas.height = Math.round(H * dpr);
-    this.canvas.style.width = W + 'px';
-    this.canvas.style.height = H + 'px';
+    this.canvas.style.width = '100%';
+    this.canvas.style.height = '100%';
     // portrait: land strip around 52-58%; landscape a bit lower
-    const portrait = H >= W;
-    this.landTop = H * (portrait ? 0.505 : 0.6);
-    this.waterY = H * (portrait ? 0.575 : 0.68);
+    this.landTop = H * (wide ? 0.6 : 0.505);
+    this.waterY = H * (wide ? 0.68 : 0.575);
     this.fx.width = Math.round(W * dpr);
     this.fx.height = Math.round(this.waterY * dpr);
     this.b1.width = Math.ceil(this.fx.width / 4 / dpr * 1);
@@ -208,25 +232,43 @@ export class Fireworks {
     this.refl.width = Math.ceil(W * rs);
     this.refl.height = Math.ceil((H - this.waterY) * rs);
     this.buildSky();
+    this.buildWater();
     this.buildLand();
     this.stars = [];
     const ns = Math.round((W * this.landTop) / 2600);
+    // stars fill the whole sky above the land, whatever the orientation
     for (let i = 0; i < ns; i++)
       this.stars.push({ x: Math.random() * W, y: Math.random() * this.landTop * 0.95, r: rand(0.4, 1.3), a: rand(0.15, 0.7), ph: rand(0, TAU), sp: rand(0.6, 2.6) });
   };
 
+  /** sky covers the FULL canvas (any orientation); gradient ends at the waterline. Dithered to avoid banding. */
   private buildSky() {
-    const { W, waterY, dpr } = this;
-    this.sky.width = Math.round(W * dpr);
-    this.sky.height = Math.round(waterY * dpr);
-    const g = this.sky.getContext('2d')!;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const grad = g.createLinearGradient(0, 0, 0, waterY);
+    const cw = this.canvas.width, ch = this.canvas.height;
+    const wy = Math.round(this.waterY * this.dpr);
+    this.sky.width = cw;
+    this.sky.height = ch;
+    const g = this.sky.getContext('2d', { willReadFrequently: true })!;
+    const grad = g.createLinearGradient(0, 0, 0, wy);
     grad.addColorStop(0, '#000000');
     grad.addColorStop(0.55, '#020208');
     grad.addColorStop(1, this.theme.horizon);
     g.fillStyle = grad;
-    g.fillRect(0, 0, W, waterY);
+    g.fillRect(0, 0, cw, ch);
+    dither(g, cw, ch, 2.2);
+  }
+
+  private buildWater() {
+    const cw = this.canvas.width, ch = this.canvas.height;
+    const wy = Math.floor(this.waterY * this.dpr);
+    this.water.width = cw;
+    this.water.height = Math.max(1, ch - wy);
+    const g = this.water.getContext('2d', { willReadFrequently: true })!;
+    const grad = g.createLinearGradient(0, 0, 0, this.water.height);
+    grad.addColorStop(0, '#05060c');
+    grad.addColorStop(1, '#000000');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, cw, this.water.height);
+    dither(g, cw, this.water.height, 2.2);
   }
 
   private buildLand() {
@@ -362,23 +404,32 @@ export class Fireworks {
   }
 
   // ---------- pointer ----------
+  /** true when the app container is rotated 90deg clockwise via CSS (iOS landscape fallback) */
+  rotated = false;
+  private toLocal(e: PointerEvent): [number, number] {
+    if (!this.rotated) return [e.clientX, e.clientY];
+    // container: translateX(screenW) rotate(90deg), origin top-left => local x = screen y, local y = screenW - screen x
+    return [e.clientY, window.innerWidth - e.clientX];
+  }
   private onDown = (e: PointerEvent) => {
     e.preventDefault();
     this.onInteract?.();
-    this.drag = { x: e.clientX, y: e.clientY, dist: 0, count: 0, id: e.pointerId };
-    this.launch(e.clientX, e.clientY);
+    const [x, y] = this.toLocal(e);
+    this.drag = { x, y, dist: 0, count: 0, id: e.pointerId };
+    this.launch(x, y);
   };
   private onMove = (e: PointerEvent) => {
     const d = this.drag;
     if (!d || d.id !== e.pointerId) return;
-    const dx = e.clientX - d.x, dy = e.clientY - d.y;
+    const [lx, ly] = this.toLocal(e);
+    const dx = lx - d.x, dy = ly - d.y;
     d.dist += Math.hypot(dx, dy);
-    d.x = e.clientX; d.y = e.clientY;
+    d.x = lx; d.y = ly;
     const spacing = 42 * this.U;
     if (d.dist > spacing && d.count < 14) {
       d.dist = 0;
       d.count++;
-      this.launch(e.clientX, e.clientY, undefined, 0.85);
+      this.launch(lx, ly, undefined, 0.85);
     }
   };
   private onUp = (e: PointerEvent) => {
@@ -815,12 +866,18 @@ export class Fireworks {
       gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
       ctx.fillStyle = gr;
       ctx.fillRect(l.x - rad, l.y - rad, rad * 2, rad * 2);
-      const hr = W * 0.7;
-      const hg = ctx.createRadialGradient(l.x, waterY, 0, l.x, waterY, hr);
+      // horizon glow: flattened ellipse, gradient reaches 0 inside the filled rect (no hard edge)
+      const hr = Math.max(W, this.H) * 0.6;
+      ctx.save();
+      ctx.translate(l.x, waterY);
+      ctx.scale(1, 0.5);
+      const hg = ctx.createRadialGradient(0, 0, 0, 0, 0, hr);
       hg.addColorStop(0, `rgba(${r},${g},${b},${0.2 * l.i})`);
+      hg.addColorStop(0.5, `rgba(${r},${g},${b},${0.06 * l.i})`);
       hg.addColorStop(1, `rgba(${r},${g},${b},0)`);
       ctx.fillStyle = hg;
-      ctx.fillRect(l.x - hr, waterY - hr * 0.6, hr * 2, hr * 0.6);
+      ctx.fillRect(-hr, -hr, hr * 2, hr);
+      ctx.restore();
     }
     // smoke
     this.renderSmoke();
@@ -890,11 +947,9 @@ export class Fireworks {
 
     // water
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const wg = ctx.createLinearGradient(0, waterY, 0, H);
-    wg.addColorStop(0, '#05060c');
-    wg.addColorStop(1, '#000000');
-    ctx.fillStyle = wg;
-    ctx.fillRect(0, waterY, W, H - waterY);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.water, 0, this.canvas.height - this.water.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalCompositeOperation = 'lighter';
     const strip = this.quality.strip;
     const rsY = rh / reflH;
