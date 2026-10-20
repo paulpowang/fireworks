@@ -1,14 +1,15 @@
 // Synthesized fireworks sound effects (Web Audio, no samples).
 export class Sfx {
   ctx: AudioContext | null = null;
-  private bus!: GainNode; // everything goes into bus
-  private out!: GainNode; // bus -> speakers (muted by mute toggle)
-  dest: MediaStreamAudioDestinationNode | null = null; // bus -> recorder (not muted)
+  private sfxGain!: GainNode; // SFX voices -> sfxGain (mute toggle) -> bus
+  bus!: GainNode; // SFX + music -> compressor -> speakers + recorder
+  musicIn!: GainNode; // music player connects here (not affected by SFX mute)
+  dest: MediaStreamAudioDestinationNode | null = null; // recorder tap (music + audible SFX)
   private noise!: AudioBuffer;
   private crackleBuf!: AudioBuffer;
   private voices = 0;
   private lastPop = 0;
-  muted = false;
+  muted = true; // SFX default muted (booms can be noisy); App restores the saved choice
 
   unlock() {
     if (this.ctx) {
@@ -29,10 +30,13 @@ export class Sfx {
     this.bus = ctx.createGain();
     this.bus.gain.value = 0.9;
     this.bus.connect(comp);
-    this.out = ctx.createGain();
-    this.out.gain.value = this.muted ? 0 : 1;
-    comp.connect(this.out);
-    this.out.connect(ctx.destination);
+    this.sfxGain = ctx.createGain();
+    this.sfxGain.gain.value = this.muted ? 0 : 1;
+    this.sfxGain.connect(this.bus);
+    this.musicIn = ctx.createGain();
+    this.musicIn.gain.value = 1;
+    this.musicIn.connect(this.bus);
+    comp.connect(ctx.destination);
     try {
       this.dest = ctx.createMediaStreamDestination();
       comp.connect(this.dest);
@@ -65,11 +69,12 @@ export class Sfx {
 
   setMuted(m: boolean) {
     this.muted = m;
-    if (this.ctx) this.out.gain.setTargetAtTime(m ? 0 : 1, this.ctx.currentTime, 0.02);
+    if (this.ctx) this.sfxGain.gain.setTargetAtTime(m ? 0 : 1, this.ctx.currentTime, 0.02);
   }
 
   private ready() {
-    return !!this.ctx && this.ctx.state === 'running';
+    // muted: don't even build the nodes
+    return !this.muted && !!this.ctx && this.ctx.state === 'running';
   }
 
   private panner(pan: number): AudioNode {
@@ -77,10 +82,10 @@ export class Sfx {
     if (ctx.createStereoPanner) {
       const p = ctx.createStereoPanner();
       p.pan.value = Math.max(-1, Math.min(1, pan));
-      p.connect(this.bus);
+      p.connect(this.sfxGain);
       return p;
     }
-    return this.bus;
+    return this.sfxGain;
   }
 
   private voice(dur: number) {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Fireworks } from './engine/fireworks';
 import { Sfx } from './engine/audio';
+import MusicPanel from './MusicPanel';
 import { SHELLS, THEMES, type ShellType, type ThemeId } from './engine/themes';
 
 type Result = { blob: Blob; url: string; name: string; kind: 'video' | 'image' };
@@ -49,7 +50,10 @@ export default function App() {
 
   const [shell, setShell] = useState<ShellType | 'random'>('senrin');
   const [theme, setTheme] = useState<ThemeId>('sakura');
-  const [muted, setMuted] = useState(false);
+  // SFX default muted; remember the user's choice
+  const [muted, setMuted] = useState(() => { try { return localStorage.getItem('fw.sfxMuted') !== '0'; } catch { return true; } });
+  const [musicOpen, setMusicOpen] = useState(false);
+  const [fwReady, setFwReady] = useState<Fireworks | null>(null);
   const [mirror, setMirror] = useState(false);
   const [auto, setAuto] = useState(false);
   const [text, setText] = useState('煙火');
@@ -120,6 +124,7 @@ export default function App() {
   useEffect(() => {
     const fw = new Fireworks(canvasRef.current!, sfxRef.current);
     fwRef.current = fw;
+    setFwReady(fw);
     fw.onInteract = () => {
       sfxRef.current.unlock();
       setHint(false);
@@ -154,7 +159,10 @@ export default function App() {
   useEffect(() => { fwRef.current?.setTheme(theme); }, [theme]);
   useEffect(() => { if (fwRef.current) fwRef.current.mirror = mirror; }, [mirror]);
   useEffect(() => { fwRef.current?.setAuto(auto); }, [auto]);
-  useEffect(() => { sfxRef.current.setMuted(muted); }, [muted]);
+  useEffect(() => {
+    sfxRef.current.setMuted(muted);
+    try { localStorage.setItem('fw.sfxMuted', muted ? '1' : '0'); } catch { /* private mode */ }
+  }, [muted]);
   useEffect(() => { fwRef.current?.setText(text); }, [text]);
 
   const flash = (m: string) => {
@@ -269,7 +277,7 @@ export default function App() {
           </button>
         </div>
         <div className="group">
-          <button className="icon" aria-label={muted ? '開啟聲音' : '靜音'} onClick={ui(() => setMuted((m) => !m))}>
+          <button className="icon" aria-label={muted ? '開啟聲音' : '靜音'} onClick={ui(() => { setMuted((m) => { flash(m ? '音效已開啟' : '音效已關閉'); return !m; }); })}>
             {muted ? Icon.mute : Icon.sound}
           </button>
           <button className={'icon' + (mirror ? ' on' : '')} aria-label="鏡像" onClick={ui(() => setMirror((m) => !m))}>
@@ -301,7 +309,18 @@ export default function App() {
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
           />
         )}
+        {musicOpen && (
+          <MusicPanel
+            fw={fwReady}
+            sfx={sfxRef.current}
+            theme={THEMES.find((t) => t.id === theme) || THEMES[0]}
+            onClose={() => setMusicOpen(false)}
+            onPlayingChange={(p) => { if (p) setAuto(false); }}
+            toast={flash}
+          />
+        )}
         <div className="themes">
+          <button className={'pill small' + (musicOpen ? ' on' : '')} onClick={ui(() => setMusicOpen((o) => !o))}>♪ 配樂</button>
           {THEMES.map((t) => (
             <button
               key={t.id}

@@ -97,3 +97,32 @@ button { font: inherit; color: inherit; border: 0; cursor: pointer; }
 .app.land .textin { width: 120px; height: 26px; font-size: 14px; flex: 0 0 auto; }
 .app.land .hint { top: 30%; }
 .app.land .recbadge, .app.land .stats { top: calc(env(safe-area-inset-top) + 40px); }
+
+/* ---- music sync panel ---- */
+.pill.small { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 13px; display: inline-flex; align-items: center; cursor: pointer; }
+.themes { align-items: center; }
+label.pill { display: inline-flex; align-items: center; cursor: pointer; white-space: nowrap; flex: 0 0 auto; }
+.musicbar {
+  width: min(94vw, 460px); padding: 8px 10px; border-radius: 16px; display: flex; flex-direction: column; gap: 6px;
+  background: rgba(12,12,20,0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.12); touch-action: manipulation;
+}
+.mrow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mtitle { flex: 1; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.9; }
+.mclose { width: 24px; height: 24px; border-radius: 12px; background: rgba(255,255,255,0.1); font-size: 12px; }
+.mhint { flex: 1; font-size: 12px; opacity: 0.7; line-height: 1.35; }
+.mbtn { width: 32px; height: 32px; border-radius: 16px; background: rgba(255,255,255,0.14); font-size: 13px; flex: 0 0 auto; }
+.mtime { font-size: 11px; opacity: 0.75; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.mseek { flex: 1; min-width: 60px; accent-color: #ff6fae; touch-action: pan-x; }
+.mprog { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.15); overflow: hidden; }
+.mprog > div { height: 100%; background: linear-gradient(90deg, #ff6fae, #ffd36b); transition: width .2s; }
+.app.land .musicbar { position: absolute; bottom: calc(env(safe-area-inset-bottom) + 42px); left: 50%; transform: translateX(-50%); width: min(70vw, 520px); padding: 6px 10px; gap: 4px; }
+.app.rot .musicbar { bottom: 42px; }
+.app.land .themes .pill.small { height: 22px; font-size: 11px; }
+.pill { white-space: nowrap; flex: 0 0 auto; }
+@media (max-width: 420px) {
+  .app:not(.land) .top .pill { padding: 0 10px; font-size: 13px; letter-spacing: 0; }
+  .app:not(.land) .top .group { gap: 6px; }
+  .app:not(.land) .top .icon { width: 32px; height: 32px; }
+}
+.app.land .musicbar .mrow:last-child .mhint { font-size: 11px; }

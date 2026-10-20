@@ -92,7 +92,8 @@ class P {
 interface Rocket {
   sx: number; sy: number; tx: number; ty: number;
   x: number; y: number; t: number; T: number;
-  type: ShellType; pal: string[]; acc: number; wob: number;
+  type: ShellType; pal: string[]; acc: number; wob: number; scale: number;
+  burstAt?: number; // music clock time of the burst (timed launches)
 }
 interface Fan { x: number; y: number; t: number; next: number; wave: number; waves: number; pal: string[] }
 interface Puff { x: number; y: number; vx: number; vy: number; r: number; age: number; life: number; a: number }
@@ -152,6 +153,12 @@ export class Fireworks {
   // pointer
   private drag: { x: number; y: number; dist: number; count: number; id: number } | null = null;
   onInteract?: () => void;
+  /** called every frame after update (music scheduler hooks in here) */
+  onFrame?: (dt: number) => void;
+  /** music track time while a music show is playing, else null; timed rockets follow this clock */
+  musicClock: (() => number | null) | null = null;
+  /** called on every main burst (debug / tests) */
+  onBurst?: (type: ShellType, x: number, y: number) => void;
 
   constructor(canvas: HTMLCanvasElement, sfx: Sfx) {
     this.canvas = canvas;
@@ -372,6 +379,7 @@ export class Fireworks {
       if (dt > 0.1) dt = 0.1; // tab switch etc.
       this.perf(dt);
       this.update(dt);
+      this.onFrame?.(dt);
       this.render();
       this.raf = requestAnimationFrame(loop);
     };
@@ -476,9 +484,35 @@ export class Fireworks {
     const sy = this.waterY - 3 * U;
     const T = 0.75 + ((sy - ty) / this.H) * 0.9 + rand(-0.05, 0.1);
     const pal = pick(this.theme.palettes);
-    this.rockets.push({ sx, sy, tx, ty, x: sx, y: sy, t: 0, T, type: t, pal, acc: 0, wob: rand(0, TAU) });
-    void sizeMul;
+    this.rockets.push({ sx, sy, tx, ty, x: sx, y: sy, t: 0, T, type: t, pal, acc: 0, wob: rand(0, TAU), scale: sizeMul });
     this.sfx.launch((tx / W) * 2 - 1, T);
+  }
+
+  /** rise time used by launchTimed for a target at fraction yn (0..1 of screen height) */
+  flightTime(yn: number) {
+    const ty = Math.max(60 * this.U, Math.min(this.landTop - 70 * this.U, yn * this.H));
+    return 0.8 + ((this.waterY - ty) / this.H) * 0.8;
+  }
+
+  /**
+   * Music shows: launch so the burst happens exactly `flight` seconds after the scheduled launch time.
+   * `late` = how long ago the launch should have happened (frame jitter), so the rocket starts part-way.
+   * x, y in 0..1 of width / height.
+   */
+  launchTimed(xn: number, yn: number, type: ShellType, flight: number, late: number, scale = 1) {
+    const { W, U } = this;
+    let x = xn * W;
+    if (this.mirror && x > W / 2) x = W - x;
+    if (type === 'fan') { this.launch(x, yn * this.H, 'fan'); return; }
+    const ty = Math.max(60 * U, Math.min(this.landTop - 70 * U, yn * this.H));
+    const tx = Math.max(20, Math.min(W - 20, x));
+    const sx = Math.max(10, Math.min(W - 10, tx + rand(-0.05, 0.05) * W));
+    const sy = this.waterY - 3 * U;
+    const pal = pick(this.theme.palettes);
+    const now = this.musicClock?.();
+    const burstAt = now != null ? now + flight - Math.max(0, late) : undefined;
+    this.rockets.push({ sx, sy, tx, ty, x: sx, y: sy, t: Math.max(0, late), T: flight, type, pal, acc: 0, wob: rand(0, TAU), scale, burstAt });
+    if (flight - late > 0.25) this.sfx.launch((tx / W) * 2 - 1, flight - late);
   }
 
   private addLight(x: number, y: number, color: string, i: number) {
@@ -505,6 +539,8 @@ export class Fireworks {
   private vibrate(ms: number) {
     const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
     if (!nav.vibrate) return;
+    const ua = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+    if (ua && !ua.hasBeenActive) return; // browsers block vibrate before the first tap
     const now = performance.now();
     if (now - this.lastVib < 110) return;
     this.lastVib = now;
@@ -545,9 +581,11 @@ export class Fireworks {
     }
   }
 
-  private burst(type: ShellType, x: number, y: number, pal: string[]) {
-    const { U, W } = this;
-    const q = this.q;
+  private burst(type: ShellType, x: number, y: number, pal: string[], scale = 1) {
+    const { W } = this;
+    const U = this.U * scale;
+    const q = this.q * Math.max(0.6, Math.min(1.3, scale));
+    this.onBurst?.(type, x, y);
     const pan = (x / W) * 2 - 1;
     const th = this.theme;
     let boom = 0.8;
@@ -746,7 +784,11 @@ export class Fireworks {
     // rockets
     for (let i = this.rockets.length - 1; i >= 0; i--) {
       const r = this.rockets[i];
-      r.t += dt;
+      const mc = r.burstAt != null ? this.musicClock?.() : null;
+      if (mc != null) {
+        r.t = Math.max(0, r.T - (r.burstAt! - mc)); // locked to the music clock
+        if (r.burstAt! - mc <= dt * 0.5) r.t = r.T; // nearest frame, not the first frame after
+      } else r.t += dt;
       const u = Math.min(1, r.t / r.T);
       const e = 1 - (1 - u) * (1 - u);
       r.x = r.sx + (r.tx - r.sx) * e + Math.sin(r.t * 18 + r.wob) * 0.6 * U;
@@ -761,7 +803,7 @@ export class Fireworks {
       }
       if (u >= 1) {
         this.rockets.splice(i, 1);
-        this.burst(r.type, r.x, r.y, r.pal);
+        this.burst(r.type, r.x, r.y, r.pal, r.scale);
       }
     }
 

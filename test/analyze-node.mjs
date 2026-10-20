@@ -1,0 +1,20 @@
+// Run the in-browser analyzer under Node on a WAV file (fake AudioBuffer) for debugging/accuracy checks.
+import fs from 'fs';
+import { build } from 'esbuild';
+await build({ entryPoints: ['src/engine/music.ts'], bundle: true, format: 'esm', outfile: '/tmp/music.mjs', platform: 'node', logLevel: 'error' });
+const { analyzeTrack } = await import('/tmp/music.mjs?' + Date.now());
+const track = process.argv[2] || 'beat120';
+const b = fs.readFileSync(`test/${track}.wav`);
+const sr = b.readUInt32LE(24), ch = b.readUInt16LE(22);
+const data = b.subarray(44); const n = data.length / 2 / ch;
+const chans = Array.from({ length: ch }, () => new Float32Array(n));
+for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) chans[c][i] = data.readInt16LE((i * ch + c) * 2) / 32768;
+globalThis.setTimeout ??= (f) => f();
+const buf = { sampleRate: sr, numberOfChannels: ch, duration: n / sr, length: n, getChannelData: (c) => chans[c] };
+const an = await analyzeTrack(buf, () => {});
+const truth = JSON.parse(fs.readFileSync(`test/${track}.json`, 'utf8'));
+const near = (arr, t) => arr.reduce((x, y) => (Math.abs(y - t) < Math.abs(x - t) ? y : x), 1e9);
+const e = truth.beats.map((t) => Math.abs(near(an.beats, t) - t)).sort((a, b) => a - b);
+const signed = truth.beats.map((t) => near(an.beats, t) - t);
+console.log(track, 'bpm', an.bpm.toFixed(2), 'beats', an.beats.length, '/', truth.beats.length, 'median', (e[e.length >> 1] * 1000).toFixed(1), 'ms p90', (e[Math.floor(e.length * 0.9)] * 1000).toFixed(1), 'ms meanSigned', (signed.reduce((s, x) => s + x, 0) / signed.length * 1000).toFixed(1), 'ms onsets', an.onsets.length, 'peak', an.peak.map((x) => x.toFixed(1)).join('-'));
+if (process.argv[3]) console.log(an.beats.slice(0, 12).map((x) => x.toFixed(3)).join(' '));
