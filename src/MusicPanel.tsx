@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Fireworks } from './engine/fireworks';
 import type { Sfx } from './engine/audio';
-import type { Theme } from './engine/themes';
+import type { FinaleKind, Theme } from './engine/themes';
+import { Fireworks as FW } from './engine/fireworks';
 import { analyzeTrack, fallbackAnalysis, generateShow, MusicPlayer, type Analysis, type ShowEvent } from './engine/music';
 
 const MAX_BYTES = 80 * 1024 * 1024;
@@ -16,12 +17,13 @@ interface Props {
   fw: Fireworks | null;
   sfx: Sfx;
   theme: Theme;
+  finale: FinaleKind | 'random';
   onClose: () => void;
   onPlayingChange: (p: boolean) => void;
   toast: (m: string) => void;
 }
 
-export default function MusicPanel({ fw, sfx, theme, onClose, onPlayingChange, toast }: Props) {
+export default function MusicPanel({ fw, sfx, theme, finale, onClose, onPlayingChange, toast }: Props) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [progress, setProgress] = useState(0);
   const [name, setName] = useState('');
@@ -67,12 +69,13 @@ export default function MusicPanel({ fw, sfx, theme, onClose, onPlayingChange, t
         const e = evs[k];
         if (e.launched) continue;
         const yn = e.y * skyFrac;
-        const flight = fw.flightTime(yn);
+        const flight = e.type === 'finale' ? FW.finaleClimax(e.finale!) : fw.flightFor(e.type, yn);
         const late = now - (e.t - flight);
         if (late < 0) continue;
         e.launched = true;
-        if (late > flight * 0.7) continue; // too late (e.g. right after a seek): skip
-        fw.launchTimed(e.x, yn, e.type, flight, late, e.scale);
+        if (late > Math.max(0.25, flight * 0.7)) continue; // too late (e.g. right after a seek): skip
+        if (e.type === 'finale') fw.finale(e.finale!);
+        else fw.launchTimed(e.x, yn, e.type, flight, late, e.scale);
       }
     };
     return () => {
@@ -95,9 +98,9 @@ export default function MusicPanel({ fw, sfx, theme, onClose, onPlayingChange, t
   useEffect(() => {
     const an = anRef.current;
     if (!an) return;
-    evRef.current = generateShow(an, theme);
+    evRef.current = generateShow(an, theme, finale);
     markFrom(playerRef.current?.time ?? 0);
-  }, [theme]);
+  }, [theme, finale]);
 
   // cleanup on close
   useEffect(() => () => {
@@ -137,7 +140,7 @@ export default function MusicPanel({ fw, sfx, theme, onClose, onPlayingChange, t
     }
     if (job !== jobRef.current) return;
     anRef.current = an;
-    evRef.current = generateShow(an, theme);
+    evRef.current = generateShow(an, theme, finale);
     markFrom(0);
     const p = new MusicPlayer(ctx, sfx.musicIn, buf);
     p.onEnded = () => { setPlaying(false); onPlayingChange(false); setTime(p.duration); };

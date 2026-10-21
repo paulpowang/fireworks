@@ -8,7 +8,24 @@ export type ShellType =
   | 'multibreak'
   | 'crackle'
   | 'text'
-  | 'fan';
+  | 'fan'
+  | 'niagara' // 瀑布
+  | 'kamuro' // 冠菊
+  | 'palm' // 椰子
+  | 'ground' // 地面火花
+  | 'pistil' // 雙芯
+  | 'starmine' // 速射連發
+  | 'giant'; // internal: 長岡 giant chrysanthemum (finale only)
+
+export type FinaleKind = 'classic' | 'nagaoka' | 'phoenix';
+export const FINALES: { id: FinaleKind | 'random'; label: string }[] = [
+  { id: 'classic', label: '經典終章' },
+  { id: 'nagaoka', label: '長岡巨型' },
+  { id: 'phoenix', label: '鳳凰亂舞' },
+  { id: 'random', label: '隨機' },
+];
+/** set pieces fire from the ground / in place, no shell rocket */
+export const SET_PIECES: ShellType[] = ['fan', 'niagara', 'ground', 'starmine'];
 
 export type ThemeId = 'sakura' | 'cyan' | 'crimson' | 'amethyst' | 'indigo' | 'mixed';
 
@@ -43,7 +60,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.12,
     smokeAmount: 1,
     horizon: '#16060f',
-    weights: { senrin: 6, peony: 2, chrysanthemum: 2, ring: 1, heart: 1, crackle: 1, multibreak: 1 },
+    weights: { senrin: 6, peony: 2, chrysanthemum: 2, ring: 1, heart: 1, crackle: 1, multibreak: 1, pistil: 2, niagara: 0.6, starmine: 0.8, kamuro: 0.8 },
     finale: ['senrin', 'senrin', 'peony', 'crackle', 'multibreak', 'chrysanthemum'],
   },
   {
@@ -61,7 +78,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.15,
     smokeAmount: 1,
     horizon: '#03121a',
-    weights: { fan: 3, senrin: 3, peony: 2, chrysanthemum: 2, ring: 2 },
+    weights: { fan: 3, senrin: 3, peony: 2, chrysanthemum: 2, ring: 2, pistil: 2, starmine: 1, ground: 0.6 },
     finale: ['fan', 'senrin', 'fan', 'chrysanthemum', 'ring', 'senrin'],
   },
   {
@@ -79,7 +96,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.55,
     smokeAmount: 2.2,
     horizon: '#1a0602',
-    weights: { senrin: 4, peony: 3, chrysanthemum: 2, willow: 1, multibreak: 1 },
+    weights: { senrin: 4, peony: 3, chrysanthemum: 2, willow: 1, multibreak: 1, niagara: 1, kamuro: 1, palm: 1, ground: 0.6 },
     finale: ['senrin', 'peony', 'senrin', 'chrysanthemum', 'multibreak'],
   },
   {
@@ -97,7 +114,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.18,
     smokeAmount: 1.2,
     horizon: '#0f0618',
-    weights: { crackle: 3, senrin: 3, peony: 2, multibreak: 2, chrysanthemum: 1, heart: 1 },
+    weights: { crackle: 3, senrin: 3, peony: 2, multibreak: 2, chrysanthemum: 1, heart: 1, pistil: 2, niagara: 0.7, starmine: 1 },
     finale: ['crackle', 'senrin', 'crackle', 'multibreak', 'senrin', 'peony'],
   },
   {
@@ -115,7 +132,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.12,
     smokeAmount: 1,
     horizon: '#04061a',
-    weights: { senrin: 4, peony: 3, ring: 2, chrysanthemum: 2, crackle: 1 },
+    weights: { senrin: 4, peony: 3, ring: 2, chrysanthemum: 2, crackle: 1, pistil: 2, kamuro: 1, starmine: 0.8 },
     finale: ['senrin', 'peony', 'ring', 'senrin', 'chrysanthemum'],
   },
   {
@@ -136,7 +153,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.12,
     smokeAmount: 1,
     horizon: '#0a0812',
-    weights: { senrin: 3, peony: 2, chrysanthemum: 2, willow: 2, heart: 1, ring: 1, multibreak: 2, crackle: 2, fan: 1 },
+    weights: { senrin: 3, peony: 2, chrysanthemum: 2, willow: 2, heart: 1, ring: 1, multibreak: 2, crackle: 2, fan: 1, kamuro: 1.5, palm: 1.5, pistil: 2, niagara: 0.8, ground: 0.8, starmine: 1 },
     finale: ['senrin', 'willow', 'crackle', 'multibreak', 'peony', 'chrysanthemum'],
   },
 ];
@@ -152,5 +169,11 @@ export const SHELLS: { id: ShellType | 'random'; label: string }[] = [
   { id: 'multibreak', label: '多段' },
   { id: 'crackle', label: '閃爍' },
   { id: 'fan', label: '光扇' },
+  { id: 'kamuro', label: '冠菊' },
+  { id: 'palm', label: '椰子' },
+  { id: 'pistil', label: '雙芯' },
+  { id: 'niagara', label: '瀑布' },
+  { id: 'ground', label: '地面火花' },
+  { id: 'starmine', label: '速射連發' },
   { id: 'text', label: '文字' },
 ];

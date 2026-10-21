@@ -4,3 +4,4 @@ reference
 *.png
 !public/*.png
 test/*.wav
+reference*/

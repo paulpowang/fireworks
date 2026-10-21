@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Fireworks } from './engine/fireworks';
 import { Sfx } from './engine/audio';
 import MusicPanel from './MusicPanel';
-import { SHELLS, THEMES, type ShellType, type ThemeId } from './engine/themes';
+import { FINALES, SHELLS, THEMES, type FinaleKind, type ShellType, type ThemeId } from './engine/themes';
 
 type Result = { blob: Blob; url: string; name: string; kind: 'video' | 'image' };
 
@@ -53,6 +53,10 @@ export default function App() {
   // SFX default muted; remember the user's choice
   const [muted, setMuted] = useState(() => { try { return localStorage.getItem('fw.sfxMuted') !== '0'; } catch { return true; } });
   const [musicOpen, setMusicOpen] = useState(false);
+  const [finaleKind, setFinaleKind] = useState<FinaleKind | 'random'>(() => {
+    try { return (localStorage.getItem('fw.finale') as FinaleKind | 'random') || 'classic'; } catch { return 'classic'; }
+  });
+  const [finaleMenu, setFinaleMenu] = useState(false);
   const [fwReady, setFwReady] = useState<Fireworks | null>(null);
   const [mirror, setMirror] = useState(false);
   const [auto, setAuto] = useState(false);
@@ -269,8 +273,8 @@ export default function App() {
           <button className={'pill' + (auto ? ' on' : '')} onClick={ui(() => setAuto((a) => !a))}>
             {auto ? '停止' : '自動秀'}
           </button>
-          <button className="pill gold" onClick={ui(() => fwRef.current?.finale())}>
-            終章
+          <button className={'pill gold' + (finaleMenu ? ' on' : '')} onClick={ui(() => setFinaleMenu((m) => !m))}>
+            終章 ▾
           </button>
           <button className={'pill' + (landMode !== 'off' ? ' on' : '')} onClick={ui(() => void toggleLandscape())}>
             {landMode !== 'off' ? '直屏' : '橫屏'}
@@ -291,6 +295,25 @@ export default function App() {
           </button>
         </div>
       </div>
+      {finaleMenu && (
+        <div className="finmenu" onPointerDown={(e) => e.stopPropagation()}>
+          {FINALES.map((f) => (
+            <button
+              key={f.id}
+              className={'chip' + (finaleKind === f.id ? ' on' : '')}
+              onClick={ui(() => {
+                setFinaleKind(f.id);
+                try { localStorage.setItem('fw.finale', f.id); } catch { /* ignore */ }
+                setFinaleMenu(false);
+                const used = fwRef.current?.finale(f.id);
+                if (used) flash(FINALES.find((x) => x.id === used)?.label ?? '終章');
+              })}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
       {recSec !== null && <div className="recbadge">● 錄影中 {recSec}s</div>}
       {debug && <div className="stats">{stats}</div>}
 
@@ -314,6 +337,7 @@ export default function App() {
             fw={fwReady}
             sfx={sfxRef.current}
             theme={THEMES.find((t) => t.id === theme) || THEMES[0]}
+            finale={finaleKind}
             onClose={() => setMusicOpen(false)}
             onPlayingChange={(p) => { if (p) setAuto(false); }}
             toast={flash}

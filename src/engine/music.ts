@@ -1,6 +1,6 @@
 // In-browser music analysis (spectral-flux onsets, tempo, DP beat tracking, energy bands)
 // and show generation for the 配樂同步 mode. Nothing is uploaded.
-import type { ShellType, Theme } from './themes';
+import type { FinaleKind, ShellType, Theme } from './themes';
 
 export interface Analysis {
   duration: number; // full track length (s)
@@ -19,7 +19,8 @@ export interface Analysis {
 
 export interface ShowEvent {
   t: number; // when the burst should happen (track time, s)
-  type: ShellType;
+  type: ShellType | 'finale';
+  finale?: FinaleKind; // for type 'finale': which finale (its climax lands on t)
   x: number; // 0..1 of width
   y: number; // 0..1 of sky height (0 = top)
   scale: number;
@@ -277,7 +278,7 @@ function rng(seed: number) {
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
 }
 
-export function generateShow(an: Analysis, theme: Theme): ShowEvent[] {
+export function generateShow(an: Analysis, theme: Theme, finale: FinaleKind | 'random' = 'classic'): ShowEvent[] {
   const r = rng(Math.round(an.duration * 1000) + an.beats.length);
   const at = (arr: Float32Array, t: number) => {
     if (arr.length === 1) return arr[0];
@@ -300,6 +301,15 @@ export function generateShow(an: Analysis, theme: Theme): ShowEvent[] {
     ev.push({ t, type, x: Math.max(0.06, Math.min(0.94, x)), y: Math.max(0.08, Math.min(0.62, yy)), scale });
   };
   const inPeak = (t: number) => t >= an.peak[0] && t <= an.peak[1];
+  // set pieces (waterfall / ground / starmine) last several seconds: keep them apart
+  let lastSet = -1e9;
+  const setPiece = (t: number, type: ShellType, x = 0.5, y = 0.45) => {
+    if (t - lastSet < 7) return false;
+    lastSet = t;
+    add(t, type, 1, x, y);
+    return true;
+  };
+  let wasLoud = false;
 
   an.beats.forEach((bt, i) => {
     const e = at(an.env, bt), lo = at(an.low, bt), hi = at(an.high, bt);
@@ -307,22 +317,29 @@ export function generateShow(an: Analysis, theme: Theme): ShowEvent[] {
     const eBefore = at(an.env, bt - 1.5);
     const drop = e - eBefore > 0.35 && e > 0.6;
     const big = 0.8 + lo * 0.35;
+    const loud = e >= 0.72;
+    const enteringLoud = loud && !wasLoud;
+    wasLoud = loud;
     if (drop) {
-      // drop: senrin cluster across the sky
-      for (let k = 0; k < 4; k++) add(bt, 'senrin', 1.05, 0.15 + k * 0.233 + (r() - 0.5) * 0.06, 0.18 + r() * 0.15);
+      // drop: waterfall curtain (if free) + senrin cluster across the sky
+      if (r() < 0.5 && setPiece(bt, 'niagara', 0.5, 0.45)) add(bt, 'senrin', 1.05, 0.5, 0.15);
+      else for (let k = 0; k < 4; k++) add(bt, 'senrin', 1.05, 0.15 + k * 0.233 + (r() - 0.5) * 0.06, 0.18 + r() * 0.15);
       return;
     }
+    if (enteringLoud && r() < 0.6) setPiece(bt, 'ground');
     if (e < 0.2) {
-      if (i % 2 === 0) add(bt, r() < 0.5 ? 'peony' : 'willow', 0.7 + lo * 0.2);
+      if (i % 2 === 0) add(bt, down && r() < 0.35 ? 'kamuro' : r() < 0.5 ? 'peony' : 'willow', 0.7 + lo * 0.2);
     } else if (e < 0.45) {
-      add(bt, down ? 'chrysanthemum' : r() < 0.6 ? 'peony' : 'ring', 0.8 + lo * 0.2);
+      add(bt, down ? (r() < 0.35 ? 'palm' : 'chrysanthemum') : r() < 0.6 ? 'peony' : 'ring', 0.8 + lo * 0.2);
     } else if (e < 0.72) {
-      add(bt, pickW(['peony', 'chrysanthemum', 'senrin', 'ring', 'heart', 'willow']), big);
-      if (down) add(bt, pickW(['senrin', 'multibreak']), big);
+      add(bt, pickW(['peony', 'chrysanthemum', 'senrin', 'ring', 'heart', 'willow', 'pistil', 'palm', 'kamuro']), big);
+      if (down) add(bt, pickW(['senrin', 'multibreak', 'pistil']), big);
       if (hi > 0.7 && r() < 0.4) add(bt, 'crackle', 0.9);
     } else {
-      // peaks: senrin clusters, multi-break, glitter
-      if (down || inPeak(bt)) {
+      // peaks: senrin clusters / starmine, multi-break, glitter
+      if (down && inPeak(bt) && r() < 0.4 && setPiece(bt, 'starmine', 0.5, 0.5)) {
+        add(bt, 'kamuro', 1.05, 0.5, 0.15);
+      } else if (down || inPeak(bt)) {
         const cx = 0.25 + r() * 0.5;
         add(bt, 'senrin', 1.05, cx - 0.22); add(bt, 'senrin', 1.1, cx); add(bt, 'senrin', 1.05, cx + 0.22);
       } else {
@@ -353,6 +370,21 @@ export function generateShow(an: Analysis, theme: Theme): ShowEvent[] {
     const n = last ? 7 : 2;
     for (let k = 0; k < n; k++) add(b, last ? (k % 2 ? 'crackle' : 'senrin') : 'multibreak', 1.05, (k + 0.5) / n + (r() - 0.5) * 0.05, last ? 0.15 + r() * 0.12 : undefined);
   });
+
+  // special finale: its climax lands on a beat near the end of the finale section
+  const fk: FinaleKind = finale === 'random' ? (['classic', 'nagaoka', 'phoenix'] as FinaleKind[])[Math.floor(r() * 3)] : finale;
+  if (fk !== 'classic') {
+    const target = fk === 'phoenix' ? fEnd - 6.2 : fEnd - 4.5; // phoenix: 3 waves 3 s apart; nagaoka: rows at +0/+2.6/+5.2 s
+    const climaxMin = fk === 'phoenix' ? 0.5 : 2.0;
+    const cand = an.beats.filter((b) => b >= climaxMin);
+    if (cand.length) {
+      const bt = cand.reduce((a, b) => (Math.abs(b - target) < Math.abs(a - target) ? b : a), cand[0]);
+      // clear regular shells while the finale runs so it stays readable and within budget
+      const endT = bt + (fk === 'phoenix' ? 6.5 : 6);
+      for (let k = ev.length - 1; k >= 0; k--) if (ev[k].t > bt - 0.3 && ev[k].t < endT && r() < 0.75) ev.splice(k, 1);
+      ev.push({ t: bt, type: 'finale', finale: fk, x: 0.5, y: 0.4, scale: 1 });
+    }
+  }
 
   // density cap: at most 9 bursts in any 0.5 s window
   ev.sort((a, b) => a.t - b.t);

@@ -1,5 +1,5 @@
 import { Sfx } from './audio';
-import { THEMES, type ShellType, type Theme, type ThemeId } from './themes';
+import { SET_PIECES, THEMES, type FinaleKind, type ShellType, type Theme, type ThemeId } from './themes';
 
 const TAU = Math.PI * 2;
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -95,6 +95,11 @@ interface Rocket {
   type: ShellType; pal: string[]; acc: number; wob: number; scale: number;
   burstAt?: number; // music clock time of the burst (timed launches)
 }
+interface Emitter {
+  kind: 'curtain' | 'fountain';
+  x: number; y: number; w: number; t: number; dur: number; rate: number; acc: number;
+  colors: string[]; power: number;
+}
 interface Fan { x: number; y: number; t: number; next: number; wave: number; waves: number; pal: string[] }
 interface Puff { x: number; y: number; vx: number; vy: number; r: number; age: number; life: number; a: number }
 interface Light { x: number; y: number; color: string; i: number }
@@ -125,6 +130,8 @@ export class Fireworks {
   private n = 0;
   private rockets: Rocket[] = [];
   private fans: Fan[] = [];
+  private emitters: Emitter[] = [];
+  private tint = { color: '#7a3cff', i: 0 };
   private puffs: Puff[] = [];
   private lights: Light[] = [];
   private stars: Star[] = [];
@@ -143,7 +150,8 @@ export class Fireworks {
   private lastVib = 0;
 
   // perf
-  private qLevel = 0;
+  qLevel = 0;
+  private qPinned = false;
   private quality: Quality;
   private emaDt = 1 / 60;
   private slowFor = 0;
@@ -170,6 +178,8 @@ export class Fireworks {
     this.reflc = this.refl.getContext('2d')!;
     const coarse = matchMedia('(pointer: coarse)').matches;
     this.qLevel = coarse ? 1 : 0;
+    const qp = new URLSearchParams(location.search).get('q');
+    if (qp != null && /^[0-3]$/.test(qp)) { this.qLevel = +qp; this.qPinned = true; }
     this.quality = this.qualityFor(this.qLevel);
     for (let i = 0; i < 7000; i++) this.parts.push(new P());
     this.setText('煙火');
@@ -394,7 +404,7 @@ export class Fireworks {
     this.emaDt += (dt - this.emaDt) * 0.05;
     if (this.emaDt > 1 / 48) this.slowFor += dt;
     else this.slowFor = Math.max(0, this.slowFor - dt * 0.5);
-    if (this.slowFor > 1.5 && this.qLevel < 3 && this.time - this.lastQChange > 3) {
+    if (!this.qPinned && this.slowFor > 1.5 && this.qLevel < 3 && this.time - this.lastQChange > 3) {
       this.qLevel++;
       this.quality = this.qualityFor(this.qLevel);
       this.lastQChange = this.time;
@@ -445,8 +455,9 @@ export class Fireworks {
   };
 
   // ---------- spawning ----------
-  private spawn(): P | null {
-    if (this.n >= this.quality.cap) return null;
+  /** low = cosmetic (trails/embers): refused once 85% of the budget is used so shell stars still fit */
+  private spawn(low = false): P | null {
+    if (this.n >= (low ? this.quality.cap * 0.85 : this.quality.cap)) return null;
     const p = this.parts[this.n++];
     p.age = 0; p.hold = 0; p.alpha = 1; p.flicker = 0; p.phase = Math.random() * TAU;
     p.kind = Kind.Normal; p.trail = 0; p.trailAcc = 0; p.pal = null; p.grav = 1;
@@ -471,11 +482,7 @@ export class Fireworks {
     let t: ShellType = type ?? (this.shell === 'random' ? this.randomType() : this.shell);
     const { W, U } = this;
     if (this.mirror && x > W / 2) x = W - x;
-    if (t === 'fan') {
-      this.fans.push({ x, y: this.waterY - 4 * U, t: 0, next: 0, wave: 0, waves: 3, pal: pick(this.theme.palettes), });
-      this.sfx.launch((x / W) * 2 - 1, 0.5);
-      return;
-    }
+    if (SET_PIECES.includes(t)) { this.setPiece(t, x, y); return; }
     const minY = 60 * U;
     const maxY = this.landTop - 70 * U;
     const ty = Math.max(minY, Math.min(maxY, y));
@@ -486,6 +493,76 @@ export class Fireworks {
     const pal = pick(this.theme.palettes);
     this.rockets.push({ sx, sy, tx, ty, x: sx, y: sy, t: 0, T, type: t, pal, acc: 0, wob: rand(0, TAU), scale: sizeMul });
     this.sfx.launch((tx / W) * 2 - 1, T);
+  }
+
+  /** lead time between scheduling and the visual hit for any type (set pieces fire in place) */
+  flightFor(type: ShellType, yn: number) {
+    if (type === 'starmine') return 0.4;
+    if (SET_PIECES.includes(type)) return 0;
+    return this.flightTime(yn);
+  }
+
+  /** rocket with explicit flight time (starmine / finales) */
+  private quickRocket(x: number, ty: number, type: ShellType, T: number, pal: string[], scale = 1) {
+    const sy = this.waterY - 3 * this.U;
+    this.rockets.push({ sx: x + rand(-4, 4) * this.U, sy, tx: x, ty, x, y: sy, t: 0, T, type, pal, acc: 0, wob: rand(0, TAU), scale });
+  }
+
+  /** ground / in-place set pieces */
+  private setPiece(t: ShellType, x: number, y: number) {
+    const { W, U, landTop, waterY } = this;
+    const wide = W > this.H;
+    const pan = (x / W) * 2 - 1;
+    if (t === 'fan') {
+      this.fans.push({ x, y: waterY - 4 * U, t: 0, next: 0, wave: 0, waves: 3, pal: pick(this.theme.palettes) });
+      this.sfx.launch(pan, 0.5);
+    } else if (t === 'niagara') {
+      // 瀑布: a horizontal fuse line in the mid/low sky pouring a curtain of glittering sparks
+      const variants = [['#ff2d2d', '#ff6b5a', '#ffd0c0'], ['#ff4fa3', '#ff9bd0', '#ffe0f0'], ['#ffd36b', '#ffb347', '#fff1c2']];
+      const cols = this.theme.id === 'crimson' ? variants[0] : this.theme.id === 'sakura' || this.theme.id === 'amethyst' ? pick(variants.slice(0, 2)) : pick(variants);
+      const yy = Math.max(landTop * 0.3, Math.min(landTop * 0.62, y));
+      const w = W * (wide ? 0.55 : 0.82);
+      const cx = Math.max(w / 2 + 6, Math.min(W - w / 2 - 6, x));
+      this.emitters.push({ kind: 'curtain', x: cx, y: yy, w, t: 0, dur: rand(4.5, 5.5), rate: 300, acc: 0, colors: cols, power: 1 });
+      this.addLight(cx, yy, cols[0], 0.7);
+      this.sfx.crackle(pan); this.sfx.crackle(pan, 1.5); this.sfx.crackle(pan, 3);
+    } else if (t === 'ground') {
+      // 地面火花: row of fountains / mines along the shore + thin white rising comets
+      const n = wide ? 9 : 6;
+      const cols = [['#ff7ab8', '#ffd1ea'], ['#ff9a3c', '#ffd27a'], ['#ffffff', '#fff1c2']];
+      for (let k = 0; k < n; k++) {
+        const fx = ((k + 0.5) / n) * W + rand(-6, 6) * U;
+        this.timed.push({ t: this.time + k * 0.06, fn: () => this.emitters.push({
+          kind: 'fountain', x: fx, y: waterY - 2 * U, w: 0, t: 0, dur: rand(3.2, 4.2), rate: 70, acc: 0, colors: cols[k % 3], power: rand(0.8, 1.15) }) });
+      }
+      for (let k = 0; k < 6; k++) this.timed.push({ t: this.time + 0.3 + k * 0.45, fn: () => this.comet(rand(0.1, 0.9) * W) });
+      this.addLight(W / 2, waterY - 30 * U, '#ffb070', 0.8);
+      this.sfx.crackle(pan, 0.2);
+    } else if (t === 'starmine') {
+      // 速射連發: rapid low row of small multicolour bursts + a few big shells above
+      const n = wide ? 18 : 12;
+      const multi = ['#ff4fa3', '#ffd36b', '#14ffc8', '#2fa8ff', '#b84dff', '#ff3b30', '#7dff4f', '#ffffff'];
+      const lowY = landTop * 0.62;
+      for (let k = 0; k < n; k++) {
+        const u = k / (n - 1);
+        const sx = (0.08 + (k % 2 ? 1 - u : u) * 0.84) * W;
+        const c1 = pick(multi), c2 = pick(multi);
+        this.timed.push({ t: this.time + k * 0.17, fn: () => this.quickRocket(sx, lowY + rand(-25, 20) * U, 'peony', k === 0 ? 0.4 : rand(0.32, 0.45), [c1, c2, '#ffffff'], 0.38) });
+      }
+      const big: ShellType[] = ['peony', 'chrysanthemum', 'pistil', 'senrin'];
+      for (let k = 0; k < 3; k++)
+        this.timed.push({ t: this.time + 0.3 + k * 0.7, fn: () => this.launch(rand(0.2, 0.8) * W, rand(0.25, 0.45) * landTop, pick(big)) });
+    }
+  }
+
+  /** thin white rising comet (ground pieces / finales) */
+  private comet(x: number) {
+    const p = this.spawn(); if (!p) return;
+    const U = this.U;
+    p.x = x; p.y = this.waterY - 3 * U; p.vx = rand(-15, 15) * U; p.vy = -rand(380, 470) * U;
+    p.drag = 1.0; p.grav = 1.0; p.life = rand(1.0, 1.3); p.size = 1.3 * U;
+    p.color = '#ffffff'; p.sprite = dotSprite('#ffffff');
+    p.trail = 35; p.trailLife = 0.35; p.trailSize = 0.6; p.trailGrav = 0.2;
   }
 
   /** rise time used by launchTimed for a target at fraction yn (0..1 of screen height) */
@@ -503,7 +580,7 @@ export class Fireworks {
     const { W, U } = this;
     let x = xn * W;
     if (this.mirror && x > W / 2) x = W - x;
-    if (type === 'fan') { this.launch(x, yn * this.H, 'fan'); return; }
+    if (SET_PIECES.includes(type)) { this.setPiece(type, x, yn * this.H); return; }
     const ty = Math.max(60 * U, Math.min(this.landTop - 70 * U, yn * this.H));
     const tx = Math.max(20, Math.min(W - 20, x));
     const sx = Math.max(10, Math.min(W - 10, tx + rand(-0.05, 0.05) * W));
@@ -525,7 +602,7 @@ export class Fireworks {
     const { U } = this;
     n = Math.round(n * this.theme.smokeAmount);
     for (let k = 0; k < n; k++) {
-      if (this.puffs.length > 70) this.puffs.shift();
+      if (this.puffs.length > 80) this.puffs.shift();
       const p: Puff = {
         x: x + rand(-spread, spread) * U, y: y + rand(-spread, spread) * 0.7 * U,
         vx: rand(-4, 10) * U, vy: rand(-3, 2) * U,
@@ -584,7 +661,7 @@ export class Fireworks {
   private burst(type: ShellType, x: number, y: number, pal: string[], scale = 1) {
     const { W } = this;
     const U = this.U * scale;
-    const q = this.q * Math.max(0.6, Math.min(1.3, scale));
+    const q = this.q * Math.max(0.3, Math.min(1.3, scale));
     this.onBurst?.(type, x, y);
     const pan = (x / W) * 2 - 1;
     const th = this.theme;
@@ -674,6 +751,61 @@ export class Fireworks {
         }
         break;
       }
+      case 'kamuro': {
+        // 冠菊: big gold sphere, thick long glittering tails that hang and droop
+        const R = rand(95, 120) * U;
+        this.sphere(x, y, Math.round(95 * q), R, {
+          colors: ['#ffd27a', '#ffbf4d', '#ffe6a8'], drag: 1.7, life: [3.6, 4.6], size: 2.6, grav: 0.85, flicker: 0.45,
+          trail: 11, trailLife: 1.6,
+        });
+        this.sphere(x, y, Math.round(25 * q), R * 0.2, { colors: ['#fff6d8'], life: [0.5, 0.8], size: 2 });
+        boom = 1;
+        break;
+      }
+      case 'palm': {
+        // 椰子: 6-10 thick gold comet arms that spread then curve down
+        const arms = 6 + ((Math.random() * 5) | 0);
+        const drag = 1.3;
+        const R = rand(95, 115) * U;
+        const rot = rand(0, TAU);
+        for (let k = 0; k < arms; k++) {
+          const a = rot + (k / arms) * TAU + rand(-0.12, 0.12);
+          const p = this.spawn(); if (!p) break;
+          const sp = R * drag * rand(0.9, 1.05);
+          p.x = x; p.y = y; p.vx = Math.cos(a) * sp; p.vy = Math.sin(a) * sp - 25 * U; p.drag = drag;
+          p.life = rand(2.4, 3.0); p.size = 3.1 * U; p.color = '#ffcf70'; p.sprite = dotSprite(p.color);
+          p.grav = 1.5; p.flicker = 0.2; p.trail = 38; p.trailLife = 0.9; p.trailSize = 0.72; p.trailGrav = 0.5;
+        }
+        this.sphere(x, y, Math.round(18 * q), R * 0.15, { colors: ['#fff1c2'], life: [0.4, 0.7], size: 2 });
+        boom = 1;
+        break;
+      }
+      case 'pistil': {
+        // 雙芯: outer sphere one colour, inner ring + core in contrasting colours
+        const combos = [
+          ['#2fff7a', '#3fa8ff', '#ff5fd2'], ['#ffd36b', '#ff2d55', '#ffffff'], ['#ff4fa3', '#14ffc8', '#ffd36b'],
+          ['#b84dff', '#ffe08a', '#00e5ff'], [pal[0], '#ffffff', pal[1] ?? '#ffd36b'],
+        ];
+        const [a, b, c] = pick(combos);
+        const R = rand(80, 100) * U;
+        this.sphere(x, y, Math.round(110 * q), R, { colors: [a], life: [1.6, 2.2], size: 2.2, flicker: 0.3 });
+        this.sphere(x, y, Math.round(50 * q), R * 0.55, { colors: [b], life: [1.4, 1.9], size: 2.0, flicker: 0.2 });
+        this.sphere(x, y, Math.round(22 * q), R * 0.24, { colors: [c], life: [1.1, 1.5], size: 1.8 });
+        break;
+      }
+      case 'giant': {
+        // 長岡巨型: enormous gold/white chrysanthemum (scale sets the radius)
+        const R = 100 * U;
+        this.sphere(x, y, Math.round(170 * this.q), R, {
+          colors: ['#ffc04d', '#ffd27a', '#ffb347', '#fff2c8'], drag: 2.0, life: [2.6, 3.4], size: 1.7, grav: 0.55, flicker: 0.5,
+          trail: 5, trailLife: 0.7, alpha: 0.6,
+        });
+        this.sphere(x, y, Math.round(26 * this.q), R * 0.4, { colors: ['#fff2c8'], life: [1.4, 2.0], size: 1.6, flicker: 0.3, alpha: 0.7 });
+        this.addLight(x, y, '#ffb347', 0.9);
+        this.addSmoke(x, y, 6, 70);
+        boom = 1;
+        break;
+      }
       case 'senrin':
       default: {
         // Senrin (千輪): many small submunitions, each popping into a tiny sphere
@@ -694,7 +826,7 @@ export class Fireworks {
         break;
       }
     }
-    this.sfx.boom(boom, pan);
+    if (scale > 0.5) this.sfx.boom(boom * Math.min(1, scale), pan); else this.sfx.pop(pan);
     this.vibrate(type === 'willow' || type === 'peony' ? 30 : 18);
     this.addLight(x, y, pal[0], type === 'senrin' ? 0.8 : 1);
     this.addSmoke(x, y, type === 'senrin' ? 4 : 3, 40);
@@ -735,7 +867,20 @@ export class Fireworks {
     this.autoNext = 0.2;
   }
 
-  finale() {
+  /** run a finale; returns the one actually used (random resolves here) */
+  finale(kind: FinaleKind | 'random' = 'classic'): FinaleKind {
+    const k: FinaleKind = kind === 'random' ? pick<FinaleKind>(['classic', 'nagaoka', 'phoenix']) : kind;
+    if (k === 'nagaoka') this.finaleNagaoka();
+    else if (k === 'phoenix') this.finalePhoenix();
+    else this.finaleClassic();
+    return k;
+  }
+  /** seconds from finale start to its main climax (music sync aligns this to a beat) */
+  static finaleClimax(k: FinaleKind) {
+    return k === 'nagaoka' ? 2.0 : k === 'phoenix' ? 0.5 : 7.3;
+  }
+
+  private finaleClassic() {
     const { W, H, U } = this;
     const types = this.theme.finale;
     const t0 = this.time;
@@ -747,6 +892,81 @@ export class Fireworks {
     // closing salvo
     for (let k = 0; k < 7; k++)
       this.timed.push({ t: t0 + 6.2 + k * 0.08, fn: () => this.launch(((k + 0.5) / 7) * W, rand(0.12, 0.3) * H + 10 * U, k % 2 ? 'crackle' : 'senrin') });
+  }
+
+  /** 長岡巨型: rows of enormous gold/white chrysanthemums, lit smoke, double-pistil bouquets, starmine base */
+  private finaleNagaoka() {
+    const { W, H, U, landTop } = this;
+    const t0 = this.time;
+    const wide = W > H;
+    const n = wide ? 4 : 3;
+    const R = Math.min((W / n) * 0.62, landTop * 0.36); // radius in px -> scale
+    const scale = R / (100 * U);
+    // starmine base throughout
+    this.setPiece('starmine', W / 2, landTop);
+    this.timed.push({ t: t0 + 2.6, fn: () => this.setPiece('starmine', W / 2, landTop) });
+    this.timed.push({ t: t0 + 5.2, fn: () => this.setPiece('ground', W / 2, landTop) });
+    // multicolour double-pistil bouquets in the middle band
+    for (let k = 0; k < 6; k++)
+      this.timed.push({ t: t0 + 0.2 + k * 0.25, fn: () => this.launch(((k + 0.5) / 6) * W, landTop * rand(0.45, 0.6), 'pistil') });
+    // giant row(s): rockets with fixed 1.2 s flight -> climax at t0 + 2.0
+    const rows: [number, number][] = [[0.8, 0.42], [3.4, 0.5], [6.0, 0.4]];
+    rows.forEach(([at, yf], ri) => {
+      for (let k = 0; k < n; k++) {
+        const x = ((k + 0.5) / n) * W + (ri % 2 ? (W / n) * 0.25 : 0) * (k % 2 ? 1 : -1);
+        const y = Math.max(R * 0.7, landTop * yf + (k % 2 ? -1 : 1) * 12 * U);
+        this.timed.push({ t: t0 + at, fn: () => { this.quickRocket(x, y, 'giant', 1.2, ['#ffd27a'], scale); this.sfx.launch((x / W) * 2 - 1, 1.2); } });
+      }
+    });
+    this.timed.push({ t: t0 + 7.0, fn: () => { for (let k = 0; k < 5; k++) this.launch(((k + 0.5) / 5) * W, landTop * 0.3, 'crackle'); } });
+  }
+
+  /** 鳳凰亂舞: tall narrow oval mass of hundreds of tiny peonies, 3 waves, palette shifts, purple sky */
+  private finalePhoenix() {
+    const { W, H, U, landTop } = this;
+    const t0 = this.time;
+    const top = H * 0.05, bottom = landTop - 6 * U;
+    const cy = (top + bottom) / 2, b = (bottom - top) / 2;
+    const a = Math.min(W * (W > H ? 0.12 : 0.24), b * 0.42); // narrow
+    const waves = [
+      ['#ff9a1f', '#ffc04d', '#ffe08a', '#fff1c2'],
+      ['#ff5fa8', '#ffb3d6', '#ffffff', '#ffd1ea'],
+      ['#3f6bff', '#ff2d55', '#b84dff', '#8a5cff', '#ff5fd2'],
+    ];
+    waves.forEach((cols, wi) => {
+      const ws = t0 + wi * 3;
+      const bursts = Math.round(115 * Math.max(0.5, this.q));
+      for (let k = 0; k < bursts; k++) {
+        // uniform inside the ellipse, slightly denser toward the centre
+        const ang = rand(0, TAU), rr = Math.pow(Math.random(), 0.6);
+        const x = W / 2 + Math.cos(ang) * a * rr, y = cy + Math.sin(ang) * b * rr;
+        const c = pick(cols);
+        this.timed.push({ t: ws + Math.random() * 0.7, fn: () => this.miniBurst(x, y, c) });
+      }
+      for (let k = 0; k < 8; k++) this.timed.push({ t: ws - 0.5 + k * 0.06, fn: () => this.comet(W / 2 + rand(-a, a) * 0.6) });
+      this.timed.push({ t: ws + 0.25, fn: () => {
+        this.addLight(W / 2, cy, cols[0], 1.4);
+        this.addSmoke(W / 2, cy + b * 0.3, 5, 40);
+        this.sfx.boom(0.9, 0);
+        this.sfx.crackle(0, 0.2);
+        this.vibrate(40);
+        if (wi >= 1) this.tint.i = Math.max(this.tint.i, wi === 2 ? 1 : 0.6);
+      } });
+    });
+  }
+
+  /** cheap small peony (no flicker, no trail) for dense finales */
+  private miniBurst(x: number, y: number, color: string) {
+    const U = this.U;
+    const n = 8, R = rand(13, 22) * U, drag = 3.2;
+    const sprite = dotSprite(color);
+    for (let i = 0; i < n; i++) {
+      const p = this.spawn(); if (!p) return;
+      const [vx, vy] = this.sph(R * drag);
+      p.x = x; p.y = y; p.vx = vx; p.vy = vy; p.drag = drag;
+      p.life = rand(1.0, 1.4); p.size = 1.6 * U; p.color = color; p.sprite = sprite; p.grav = 0.35; p.alpha = 0.85;
+    }
+    this.sfx.pop((x / this.W) * 2 - 1);
   }
 
   // ---------- update ----------
@@ -793,13 +1013,15 @@ export class Fireworks {
       const e = 1 - (1 - u) * (1 - u);
       r.x = r.sx + (r.tx - r.sx) * e + Math.sin(r.t * 18 + r.wob) * 0.6 * U;
       r.y = r.sy + (r.ty - r.sy) * e;
-      r.acc += dt * 70;
+      const thick = r.type === 'palm' || r.type === 'giant';
+      r.acc += dt * (thick ? 130 : r.type === 'starmine' ? 25 : 70);
       while (r.acc >= 1) {
         r.acc--;
-        const p = this.spawn(); if (!p) break;
+        const p = this.spawn(true); if (!p) break;
         p.x = r.x + rand(-0.6, 0.6) * U; p.y = r.y + rand(0, 2) * U; p.vx = rand(-6, 6) * U; p.vy = rand(5, 25) * U;
         p.drag = 3; p.life = rand(0.25, 0.55) * (1 - u * 0.5); p.size = rand(0.7, 1.2) * U;
         p.color = '#ffc477'; p.sprite = dotSprite(p.color); p.kind = Kind.Ember; p.grav = 0.4; p.alpha = 0.7;
+        if (thick) { p.size = rand(1.4, 2.4) * U; p.life *= 1.6; p.alpha = 0.85; p.color = '#ffd27a'; p.sprite = dotSprite(p.color); }
       }
       if (u >= 1) {
         this.rockets.splice(i, 1);
@@ -835,6 +1057,39 @@ export class Fireworks {
       }
     }
 
+    // emitters (waterfall curtains, fountains)
+    for (let i = this.emitters.length - 1; i >= 0; i--) {
+      const e = this.emitters[i];
+      e.t += dt;
+      if (e.t >= e.dur) { this.emitters.splice(i, 1); continue; }
+      const ramp = Math.min(1, e.t / 0.35) * Math.min(1, (e.dur - e.t) / 0.6);
+      e.acc += e.rate * dt * ramp * Math.max(0.4, this.q);
+      if (e.kind === 'curtain') {
+        const span = e.w * Math.min(1, e.t / 0.45); // fuse lights outward from the centre
+        while (e.acc >= 1) {
+          e.acc--;
+          const p = this.spawn(); if (!p) break;
+          p.x = e.x + (Math.random() - 0.5) * span; p.y = e.y + rand(-2, 2) * U;
+          p.vx = rand(-4, 4) * U; p.vy = rand(25, 60) * U; p.drag = 0.9; p.grav = 1.1;
+          p.life = rand(2.0, 3.0); p.size = rand(1.0, 1.7) * U; p.flicker = 0.85; p.alpha = 0.95;
+          p.color = Math.random() < 0.12 ? '#ffffff' : pick(e.colors); p.sprite = dotSprite(p.color);
+        }
+        if (Math.random() < dt * 2) this.addLight(e.x, e.y + 30 * U, e.colors[0], 0.35);
+      } else {
+        while (e.acc >= 1) {
+          e.acc--;
+          const p = this.spawn(); if (!p) break;
+          const ang = -Math.PI / 2 + rand(-0.17, 0.17), sp = rand(190, 300) * U * e.power;
+          p.x = e.x + rand(-2, 2) * U; p.y = e.y; p.vx = Math.cos(ang) * sp; p.vy = Math.sin(ang) * sp;
+          p.drag = 1.4; p.grav = 1.1; p.life = rand(0.7, 1.3); p.size = rand(1.0, 1.4) * U; p.flicker = 0.7;
+          p.color = pick(e.colors); p.sprite = dotSprite(p.color);
+        }
+        if (Math.random() < dt * 1.2) this.addLight(e.x, e.y - 40 * U, e.colors[0], 0.3);
+      }
+    }
+    // sky tint (phoenix finale)
+    if (this.tint.i > 0.005) this.tint.i *= Math.exp(-dt * 0.5);
+
     // particles
     for (let i = 0; i < this.n; i++) {
       const p = this.parts[i];
@@ -860,7 +1115,7 @@ export class Fireworks {
         p.trailAcc += p.trail * dt;
         while (p.trailAcc >= 1) {
           p.trailAcc--;
-          const e = this.spawn(); if (!e) break;
+          const e = this.spawn(true); if (!e) break;
           e.x = p.x; e.y = p.y; e.vx = p.vx * 0.05 + rand(-3, 3) * U; e.vy = p.vy * 0.05 + rand(-2, 4) * U;
           e.drag = 2.5; e.life = p.trailLife * rand(0.6, 1.1); e.size = p.size * p.trailSize;
           e.color = p.color; e.sprite = p.sprite; e.kind = Kind.Ember; e.grav = p.trailGrav; e.alpha = 0.55; e.flicker = 0.5;
@@ -900,6 +1155,14 @@ export class Fireworks {
     ctx.globalAlpha = 1;
     // sky/horizon glow from bursts
     ctx.globalCompositeOperation = 'lighter';
+    if (this.tint.i > 0.01) {
+      const tg = ctx.createLinearGradient(0, 0, 0, waterY);
+      tg.addColorStop(0, 'rgba(90,30,160,0)');
+      tg.addColorStop(0.5, `rgba(110,40,200,${0.16 * this.tint.i})`);
+      tg.addColorStop(1, `rgba(150,50,220,${0.26 * this.tint.i})`);
+      ctx.fillStyle = tg;
+      ctx.fillRect(0, 0, W, waterY);
+    }
     for (const l of this.lights) {
       const [r, g, b] = hexRgb(l.color);
       const rad = 230 * U;

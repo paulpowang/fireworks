@@ -126,3 +126,12 @@ label.pill { display: inline-flex; align-items: center; cursor: pointer; white-s
   .app:not(.land) .top .icon { width: 32px; height: 32px; }
 }
 .app.land .musicbar .mrow:last-child .mhint { font-size: 11px; }
+
+/* ---- finale picker ---- */
+.finmenu {
+  position: absolute; top: calc(env(safe-area-inset-top) + 50px); left: calc(env(safe-area-inset-left) + 10px);
+  display: flex; flex-wrap: wrap; gap: 6px; max-width: 92vw; padding: 8px; border-radius: 14px;
+  background: rgba(12,12,20,0.75); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12);
+}
+.app.land .finmenu { top: calc(env(safe-area-inset-top) + 40px); }
+.app.rot .finmenu { top: 40px; left: 10px; }
