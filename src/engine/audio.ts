@@ -190,6 +190,33 @@ export class Sfx {
     this.voice(0.3);
   }
 
+  /** crisp short snap for 三段連環 tiers (tier 0 = louder/lower, 1 = tiny tick); throttled hard */
+  private lastSnap = 0;
+  snap(pan: number, tier: number) {
+    if (!this.ready() || this.voices > 18) return;
+    const ctx = this.ctx!;
+    const now = ctx.currentTime;
+    if (now - this.lastSnap < (tier ? 0.05 : 0.03)) return;
+    this.lastSnap = now;
+    const out = this.panner(pan);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'bandpass';
+    hp.frequency.value = tier ? 4200 + Math.random() * 1500 : 1800 + Math.random() * 800;
+    hp.Q.value = 0.9;
+    const g = ctx.createGain();
+    const peak = tier ? 0.12 : 0.25;
+    const dur = tier ? 0.06 : 0.11;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(peak, now + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(hp).connect(g).connect(out);
+    src.start(now, Math.random());
+    src.stop(now + dur + 0.02);
+    this.voice(dur);
+  }
+
   crackle(pan: number, delay = 0) {
     if (!this.ready() || this.voices > 16) return;
     const ctx = this.ctx!;

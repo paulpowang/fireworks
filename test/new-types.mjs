@@ -5,7 +5,7 @@ const pw = require('playwright-core');
 const base = process.argv[2] || 'http://127.0.0.1:4173/fireworks/';
 const only = process.argv[3] || '';
 const browser = await pw.chromium.launch({ executablePath: '/opt/google/chrome/chrome' });
-const types = [['冠菊', 'kamuro', 2200], ['椰子', 'palm', 2100], ['雙芯', 'pistil', 1900], ['瀑布', 'niagara', 2300], ['地面火花', 'ground', 2000], ['速射連發', 'starmine', 2300]];
+const types = [['冠菊', 'kamuro', 2200], ['椰子', 'palm', 2100], ['雙芯', 'pistil', 1900], ['地面火花', 'ground', 2000], ['速射連發', 'starmine', 2300]];
 const finales = [['長岡巨型', 'nagaoka', [2300, 5100]], ['鳳凰亂舞', 'phoenix', [1100, 7100]]];
 const out = [];
 for (const [vw, vh, tag] of [[390, 844, 'portrait'], [844, 390, 'landscape']]) {
@@ -23,7 +23,7 @@ for (const [vw, vh, tag] of [[390, 844, 'portrait'], [844, 390, 'landscape']]) {
     await clear();
     await page.locator('.chip', { hasText: label }).first().tap();
     await page.touchscreen.tap(vw * 0.35, vh * 0.25);
-    if (!['niagara', 'ground', 'starmine'].includes(id)) await page.touchscreen.tap(vw * 0.68, vh * 0.2);
+    if (!['ground', 'starmine'].includes(id)) await page.touchscreen.tap(vw * 0.68, vh * 0.2);
     const peak = await sample(wait);
     await page.screenshot({ path: `test/shots/${tag}-${id}.png` });
     out.push({ tag, id, peakParticles: peak, cap: await page.evaluate(() => window.__fw.quality.cap) });

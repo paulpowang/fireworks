@@ -1,4 +1,5 @@
 import { buildTown, type TownLayers } from './town';
+import { buildRiverbank } from './riverbank';
 import { Sfx } from './audio';
 import { SET_PIECES, THEMES, type FinaleKind, type SceneId, type ShellType, type Theme, type ThemeId } from './themes';
 
@@ -76,6 +77,8 @@ const enum Kind {
   SubBreak = 2, // multi-break: explodes into small peony
   SenrinSub = 3, // senrin: explodes into mini sphere
   Glitter = 4, // strobe, may crackle at end
+  Cascade1 = 5, // 三段連環 tier-1 split comet -> tier-2 stars
+  Cascade2 = 6, // 三段連環 tier-2 star -> tier-3 crackle bloom
 }
 
 class P {
@@ -97,7 +100,7 @@ interface Rocket {
   burstAt?: number; // music clock time of the burst (timed launches)
 }
 interface Emitter {
-  kind: 'curtain' | 'fountain';
+  kind: 'fountain';
   x: number; y: number; w: number; t: number; dur: number; rate: number; acc: number;
   colors: string[]; power: number;
 }
@@ -266,8 +269,9 @@ export class Fireworks {
     this.refl.height = lake ? Math.ceil((H - this.waterY) * rs) : 1;
     this.buildSky();
     this.buildWater();
-    if (this.scene === 'town') {
-      this.town = buildTown(W, H, this.landTop, this.waterY, dpr, this.U, this.land, this.fg, this.litMask);
+    if (this.scene === 'town' || this.scene === 'field') {
+      // lit scenes: pre-rendered silhouettes + lightable mask, tinted per frame by the bursts
+      this.town = (this.scene === 'town' ? buildTown : buildRiverbank)(W, H, this.landTop, this.waterY, dpr, this.U, this.land, this.fg, this.litMask);
       this.litTmp.width = this.litMask.width; this.litTmp.height = this.litMask.height;
     } else {
       this.town = null;
@@ -475,11 +479,11 @@ export class Fireworks {
     }
     // tiny animated touches: blinking tower light, a moth circling the first lamp
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (Math.sin(time * 2.6) > 0.55) {
+    if (t.tower && Math.sin(time * 2.6) > 0.55) {
       ctx.fillStyle = 'rgba(255,50,40,0.95)';
       ctx.fillRect(t.tower.x - 1 * U, t.tower.y - 1 * U, 2 * U, 2 * U);
     }
-    const l = t.lamps[0];
+    const l = this.scene === 'town' ? t.lamps[0] : undefined;
     if (l) {
       const s = (this.H - this.waterY) / (this.W > this.H ? 170 : 236);
       const mx = l.x - 5 * s + Math.cos(time * 6.3) * 7 * s + Math.sin(time * 2.9) * 3 * s;
@@ -674,16 +678,6 @@ export class Fireworks {
     if (t === 'fan') {
       this.fans.push({ x, y: waterY - 4 * U, t: 0, next: 0, wave: 0, waves: 3, pal: pick(this.theme.palettes) });
       this.sfx.launch(pan, 0.5);
-    } else if (t === 'niagara') {
-      // 瀑布: a horizontal fuse line in the mid/low sky pouring a curtain of glittering sparks
-      const variants = [['#ff2d2d', '#ff6b5a', '#ffd0c0'], ['#ff4fa3', '#ff9bd0', '#ffe0f0'], ['#ffd36b', '#ffb347', '#fff1c2']];
-      const cols = this.theme.id === 'crimson' ? variants[0] : this.theme.id === 'sakura' || this.theme.id === 'amethyst' ? pick(variants.slice(0, 2)) : pick(variants);
-      const yy = Math.max(landTop * 0.3, Math.min(landTop * 0.62, y));
-      const w = W * (wide ? 0.55 : 0.82);
-      const cx = Math.max(w / 2 + 6, Math.min(W - w / 2 - 6, x));
-      this.emitters.push({ kind: 'curtain', x: cx, y: yy, w, t: 0, dur: rand(4.5, 5.5), rate: 300, acc: 0, colors: cols, power: 1 });
-      this.addLight(cx, yy, cols[0], 0.7);
-      this.sfx.crackle(pan); this.sfx.crackle(pan, 1.5); this.sfx.crackle(pan, 3);
     } else if (t === 'ground') {
       // 地面火花: row of fountains / mines along the shore + thin white rising comets
       const n = wide ? 9 : 6;
@@ -887,6 +881,24 @@ export class Fireworks {
         boom = 0.7;
         break;
       }
+      case 'cascade': {
+        // 三段連環 tier 1: 6-10 split comets flung outward (slightly downward); each later splits again
+        const b = this.cascadeBudget();
+        const n1 = Math.max(4, Math.round(rand(6, 10) * Math.max(0.6, b)));
+        const sp = rand(110, 140) * U;
+        const a0 = rand(0, TAU);
+        for (let i = 0; i < n1; i++) {
+          const p = this.spawn(); if (!p) break;
+          const a = a0 + (i / n1) * TAU + rand(-0.15, 0.15), s = sp * rand(0.85, 1.1);
+          p.x = x; p.y = y; p.vx = Math.cos(a) * s; p.vy = Math.sin(a) * s * 0.85 + 12 * U;
+          p.drag = 1.6; p.grav = 0.8; p.life = rand(0.5, 0.72); p.size = 2.5 * U; p.flicker = 0.1;
+          p.color = pal[0]; p.sprite = dotSprite(p.color); p.kind = Kind.Cascade1; p.pal = pal;
+          p.trail = 20; p.trailLife = 0.35; p.trailSize = 0.7; p.trailGrav = 0.3;
+        }
+        this.sphere(x, y, Math.round(18 * q), 22 * U, { colors: [pal[2] ?? '#fff'], life: [0.35, 0.55], size: 1.6, drag: 3.5 });
+        boom = 0.75;
+        break;
+      }
       case 'crackle': {
         const R = rand(80, 100) * U;
         const cols = Math.random() < 0.5 ? th.glitter : [...th.glitter, pal[0]];
@@ -990,6 +1002,12 @@ export class Fireworks {
     this.addSmoke(x, y, type === 'senrin' ? 4 : 3, 40);
   }
 
+  /** 0.25..1: scales 三段連環 tier counts down when the particle budget is tight */
+  private cascadeBudget() {
+    const cap = this.quality.cap;
+    return Math.max(0.25, Math.min(1, (cap * 0.85 - this.n) / (cap * 0.45))) * Math.max(0.85, Math.min(1, this.q));
+  }
+
   private subBurst(p: P) {
     const { U } = this;
     const pal = p.pal ?? this.theme.palettes[0];
@@ -1009,6 +1027,35 @@ export class Fireworks {
       this.sphere(p.x, p.y, Math.round(32 * this.q), R, { colors: pal.slice(0, 2), life: [0.9, 1.4], size: 1.9, flicker: 0.3 });
       this.sfx.pop(pan);
       this.addLight(p.x, p.y, pal[0], 0.35);
+    } else if (p.kind === Kind.Cascade1) {
+      // tier 2: 4-6 smaller stars, colour shifts to the 2nd palette colour, keep spreading out/down
+      const b = this.cascadeBudget();
+      const n2 = Math.max(2, Math.round(rand(4, 6) * b));
+      const c2 = pal[1] ?? pal[0];
+      const a0 = rand(0, TAU);
+      for (let i = 0; i < n2; i++) {
+        const c = this.spawn(); if (!c) break;
+        const a = a0 + (i / n2) * TAU + rand(-0.3, 0.3), s = rand(48, 66) * U;
+        c.x = p.x; c.y = p.y; c.vx = p.vx * 0.35 + Math.cos(a) * s; c.vy = p.vy * 0.35 + Math.sin(a) * s + 8 * U;
+        c.drag = 2; c.grav = 0.8; c.life = rand(0.38, 0.6); c.size = 1.9 * U; c.flicker = 0.15;
+        c.color = c2; c.sprite = dotSprite(c2); c.kind = Kind.Cascade2; c.pal = pal;
+        c.trail = 8; c.trailLife = 0.22; c.trailSize = 0.55; c.trailGrav = 0.3;
+      }
+      this.sfx.snap(pan, 0);
+      if (Math.random() < 0.35) this.addLight(p.x, p.y, c2, 0.3);
+    } else if (p.kind === Kind.Cascade2) {
+      // tier 3: tiny crisp crackle bloom (short-lived white/3rd-colour specks)
+      const b = this.cascadeBudget();
+      const n3 = Math.max(3, Math.round(rand(10, 14) * b));
+      const c3 = pal[2] ?? '#ffffff';
+      for (let i = 0; i < n3; i++) {
+        const c = this.spawn(); if (!c) break;
+        const a = rand(0, TAU), s = rand(26, 44) * U;
+        c.x = p.x; c.y = p.y; c.vx = p.vx * 0.2 + Math.cos(a) * s; c.vy = p.vy * 0.2 + Math.sin(a) * s;
+        c.drag = 3.2; c.grav = 0.5; c.life = rand(0.35, 0.65); c.size = 1.35 * U; c.flicker = 0.75; c.alpha = 0.95;
+        c.color = i % 3 === 0 ? '#ffffff' : c3; c.sprite = dotSprite(c.color);
+      }
+      this.sfx.snap(pan, 1);
     } else if (p.kind === Kind.Glitter && Math.random() < 0.3) {
       for (let k = 0; k < 3; k++) {
         const c = this.spawn(); if (!c) break;
@@ -1076,6 +1123,9 @@ export class Fireworks {
         this.timed.push({ t: t0 + at, fn: () => { this.quickRocket(x, y, 'giant', 1.2, ['#ffd27a'], scale); this.sfx.launch((x / W) * 2 - 1, 1.2); } });
       }
     });
+    // 三段連環 pair between the giant rows: the chain pops ripple under the gold
+    for (let k = 0; k < 2; k++)
+      this.timed.push({ t: t0 + 4.6 + k * 0.35, fn: () => this.launch((k ? 0.7 : 0.3) * W, landTop * 0.42, 'cascade') });
     this.timed.push({ t: t0 + 7.0, fn: () => { for (let k = 0; k < 5; k++) this.launch(((k + 0.5) / 5) * W, landTop * 0.3, 'crackle'); } });
   }
 
@@ -1215,25 +1265,14 @@ export class Fireworks {
       }
     }
 
-    // emitters (waterfall curtains, fountains)
+    // emitters (ground fountains)
     for (let i = this.emitters.length - 1; i >= 0; i--) {
       const e = this.emitters[i];
       e.t += dt;
       if (e.t >= e.dur) { this.emitters.splice(i, 1); continue; }
       const ramp = Math.min(1, e.t / 0.35) * Math.min(1, (e.dur - e.t) / 0.6);
       e.acc += e.rate * dt * ramp * Math.max(0.4, this.q);
-      if (e.kind === 'curtain') {
-        const span = e.w * Math.min(1, e.t / 0.45); // fuse lights outward from the centre
-        while (e.acc >= 1) {
-          e.acc--;
-          const p = this.spawn(); if (!p) break;
-          p.x = e.x + (Math.random() - 0.5) * span; p.y = e.y + rand(-2, 2) * U;
-          p.vx = rand(-4, 4) * U; p.vy = rand(25, 60) * U; p.drag = 0.9; p.grav = 1.1;
-          p.life = rand(2.0, 3.0); p.size = rand(1.0, 1.7) * U; p.flicker = 0.85; p.alpha = 0.95;
-          p.color = Math.random() < 0.12 ? '#ffffff' : pick(e.colors); p.sprite = dotSprite(p.color);
-        }
-        if (Math.random() < dt * 2) this.addLight(e.x, e.y + 30 * U, e.colors[0], 0.35);
-      } else {
+      {
         while (e.acc >= 1) {
           e.acc--;
           const p = this.spawn(); if (!p) break;
@@ -1253,7 +1292,7 @@ export class Fireworks {
       const p = this.parts[i];
       p.age += dt;
       if (p.age >= p.life) {
-        if (p.kind === Kind.SenrinSub || p.kind === Kind.SubBreak || p.kind === Kind.Glitter) this.subBurst(p);
+        if (p.kind === Kind.SenrinSub || p.kind === Kind.SubBreak || p.kind === Kind.Glitter || p.kind === Kind.Cascade1 || p.kind === Kind.Cascade2) this.subBurst(p);
         // swap-remove
         const lastIdx = --this.n;
         if (i !== lastIdx) {

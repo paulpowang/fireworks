@@ -321,9 +321,8 @@ export function generateShow(an: Analysis, theme: Theme, finale: FinaleKind | 'r
     const enteringLoud = loud && !wasLoud;
     wasLoud = loud;
     if (drop) {
-      // drop: waterfall curtain (if free) + senrin cluster across the sky
-      if (r() < 0.5 && setPiece(bt, 'niagara', 0.5, 0.45)) add(bt, 'senrin', 1.05, 0.5, 0.15);
-      else for (let k = 0; k < 4; k++) add(bt, 'senrin', 1.05, 0.15 + k * 0.233 + (r() - 0.5) * 0.06, 0.18 + r() * 0.15);
+      // drop: senrin cluster row across the sky
+      for (let k = 0; k < 4; k++) add(bt, 'senrin', 1.05, 0.15 + k * 0.233 + (r() - 0.5) * 0.06, 0.18 + r() * 0.15);
       return;
     }
     if (enteringLoud && r() < 0.6) setPiece(bt, 'ground');
@@ -333,7 +332,7 @@ export function generateShow(an: Analysis, theme: Theme, finale: FinaleKind | 'r
       add(bt, down ? (r() < 0.35 ? 'palm' : 'chrysanthemum') : r() < 0.6 ? 'peony' : 'ring', 0.8 + lo * 0.2);
     } else if (e < 0.72) {
       add(bt, pickW(['peony', 'chrysanthemum', 'senrin', 'ring', 'heart', 'willow', 'pistil', 'palm', 'kamuro']), big);
-      if (down) add(bt, pickW(['senrin', 'multibreak', 'pistil']), big);
+      if (down) add(bt, pickW(['senrin', 'multibreak', 'pistil', 'cascade']), big);
       if (hi > 0.7 && r() < 0.4) add(bt, 'crackle', 0.9);
     } else {
       // peaks: senrin clusters / starmine, multi-break, glitter
@@ -343,7 +342,7 @@ export function generateShow(an: Analysis, theme: Theme, finale: FinaleKind | 'r
         const cx = 0.25 + r() * 0.5;
         add(bt, 'senrin', 1.05, cx - 0.22); add(bt, 'senrin', 1.1, cx); add(bt, 'senrin', 1.05, cx + 0.22);
       } else {
-        add(bt, r() < 0.5 ? 'senrin' : 'multibreak', big);
+        add(bt, r() < 0.4 ? 'senrin' : r() < 0.6 ? 'multibreak' : 'cascade', big);
       }
       if (hi > 0.6 && r() < 0.5) add(bt, 'crackle', 1);
     }

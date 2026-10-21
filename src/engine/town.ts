@@ -12,7 +12,7 @@ export interface TownLayers {
   fgY0: number;
   maskY0: number;
   lamps: { x: number; y: number }[];
-  tower: { x: number; y: number };
+  tower: { x: number; y: number } | null;
 }
 
 export function buildTown(

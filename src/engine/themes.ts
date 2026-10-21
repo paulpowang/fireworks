@@ -6,10 +6,10 @@ export type ShellType =
   | 'heart'
   | 'ring'
   | 'multibreak'
+  | 'cascade' // 三段連環
   | 'crackle'
   | 'text'
   | 'fan'
-  | 'niagara' // 瀑布
   | 'kamuro' // 冠菊
   | 'palm' // 椰子
   | 'ground' // 地面火花
@@ -34,7 +34,7 @@ export const FINALES: { id: FinaleKind | 'random'; label: string }[] = [
   { id: 'random', label: '隨機' },
 ];
 /** set pieces fire from the ground / in place, no shell rocket */
-export const SET_PIECES: ShellType[] = ['fan', 'niagara', 'ground', 'starmine'];
+export const SET_PIECES: ShellType[] = ['fan', 'ground', 'starmine'];
 
 export type ThemeId = 'sakura' | 'cyan' | 'crimson' | 'amethyst' | 'indigo' | 'mixed';
 
@@ -69,8 +69,8 @@ export const THEMES: Theme[] = [
     smokeLit: 0.12,
     smokeAmount: 1,
     horizon: '#16060f',
-    weights: { senrin: 6, peony: 2, chrysanthemum: 2, ring: 1, heart: 1, crackle: 1, multibreak: 1, pistil: 2, niagara: 0.6, starmine: 0.8, kamuro: 0.8 },
-    finale: ['senrin', 'senrin', 'peony', 'crackle', 'multibreak', 'chrysanthemum'],
+    weights: { cascade: 1, senrin: 6, peony: 2, chrysanthemum: 2, ring: 1, heart: 1, crackle: 1, multibreak: 1, pistil: 2, starmine: 0.8, kamuro: 0.8 },
+    finale: ['senrin', 'senrin', 'peony', 'crackle', 'multibreak', 'chrysanthemum', 'cascade'],
   },
   {
     id: 'cyan',
@@ -87,7 +87,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.15,
     smokeAmount: 1,
     horizon: '#03121a',
-    weights: { fan: 3, senrin: 3, peony: 2, chrysanthemum: 2, ring: 2, pistil: 2, starmine: 1, ground: 0.6 },
+    weights: { cascade: 1, fan: 3, senrin: 3, peony: 2, chrysanthemum: 2, ring: 2, pistil: 2, starmine: 1, ground: 0.6 },
     finale: ['fan', 'senrin', 'fan', 'chrysanthemum', 'ring', 'senrin'],
   },
   {
@@ -105,7 +105,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.55,
     smokeAmount: 2.2,
     horizon: '#1a0602',
-    weights: { senrin: 4, peony: 3, chrysanthemum: 2, willow: 1, multibreak: 1, niagara: 1, kamuro: 1, palm: 1, ground: 0.6 },
+    weights: { cascade: 1, senrin: 4, peony: 3, chrysanthemum: 2, willow: 1, multibreak: 1, kamuro: 1, palm: 1, ground: 0.6 },
     finale: ['senrin', 'peony', 'senrin', 'chrysanthemum', 'multibreak'],
   },
   {
@@ -123,7 +123,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.18,
     smokeAmount: 1.2,
     horizon: '#0f0618',
-    weights: { crackle: 3, senrin: 3, peony: 2, multibreak: 2, chrysanthemum: 1, heart: 1, pistil: 2, niagara: 0.7, starmine: 1 },
+    weights: { cascade: 1, crackle: 3, senrin: 3, peony: 2, multibreak: 2, chrysanthemum: 1, heart: 1, pistil: 2, starmine: 1 },
     finale: ['crackle', 'senrin', 'crackle', 'multibreak', 'senrin', 'peony'],
   },
   {
@@ -141,7 +141,7 @@ export const THEMES: Theme[] = [
     smokeLit: 0.12,
     smokeAmount: 1,
     horizon: '#04061a',
-    weights: { senrin: 4, peony: 3, ring: 2, chrysanthemum: 2, crackle: 1, pistil: 2, kamuro: 1, starmine: 0.8 },
+    weights: { cascade: 1, senrin: 4, peony: 3, ring: 2, chrysanthemum: 2, crackle: 1, pistil: 2, kamuro: 1, starmine: 0.8 },
     finale: ['senrin', 'peony', 'ring', 'senrin', 'chrysanthemum'],
   },
   {
@@ -162,8 +162,8 @@ export const THEMES: Theme[] = [
     smokeLit: 0.12,
     smokeAmount: 1,
     horizon: '#0a0812',
-    weights: { senrin: 3, peony: 2, chrysanthemum: 2, willow: 2, heart: 1, ring: 1, multibreak: 2, crackle: 2, fan: 1, kamuro: 1.5, palm: 1.5, pistil: 2, niagara: 0.8, ground: 0.8, starmine: 1 },
-    finale: ['senrin', 'willow', 'crackle', 'multibreak', 'peony', 'chrysanthemum'],
+    weights: { cascade: 1, senrin: 3, peony: 2, chrysanthemum: 2, willow: 2, heart: 1, ring: 1, multibreak: 2, crackle: 2, fan: 1, kamuro: 1.5, palm: 1.5, pistil: 2, ground: 0.8, starmine: 1 },
+    finale: ['senrin', 'willow', 'crackle', 'multibreak', 'peony', 'chrysanthemum', 'cascade'],
   },
 ];
 
@@ -176,12 +176,12 @@ export const SHELLS: { id: ShellType | 'random'; label: string }[] = [
   { id: 'heart', label: '愛心' },
   { id: 'ring', label: '圓環' },
   { id: 'multibreak', label: '多段' },
+  { id: 'cascade', label: '三段連環' },
   { id: 'crackle', label: '閃爍' },
   { id: 'fan', label: '光扇' },
   { id: 'kamuro', label: '冠菊' },
   { id: 'palm', label: '椰子' },
   { id: 'pistil', label: '雙芯' },
-  { id: 'niagara', label: '瀑布' },
   { id: 'ground', label: '地面火花' },
   { id: 'starmine', label: '速射連發' },
   { id: 'text', label: '文字' },
