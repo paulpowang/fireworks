@@ -1,3 +1,4 @@
+import { buildTown, type TownLayers } from './town';
 import { Sfx } from './audio';
 import { SET_PIECES, THEMES, type FinaleKind, type SceneId, type ShellType, type Theme, type ThemeId } from './themes';
 
@@ -123,6 +124,14 @@ export class Fireworks {
   private sky = makeCanvas();
   private land = makeCanvas();
   private water = makeCanvas();
+  // 小鎮車站 layers (1x1 unless the town scene is active)
+  private fg = makeCanvas();
+  private litMask = makeCanvas();
+  private litTmp = makeCanvas();
+  private town: TownLayers | null = null;
+  /** per-frame aggregated burst light per screen column: r,g,b,weight */
+  private litCols = new Float32Array(8 * 4);
+  private litTotal = 0;
 
   W = 1; H = 1; U = 1; dpr = 1;
   landTop = 0; waterY = 0;
@@ -143,7 +152,7 @@ export class Fireworks {
 
   theme: Theme = THEMES[0];
   /** 'field' (default, no water) | 'lake' (water + reflection) | 'sky' (sky only) */
-  scene: SceneId = 'field';
+  scene: SceneId = 'town';
   shell: ShellType | 'random' = 'senrin';
   mirror = false;
   auto = false;
@@ -241,6 +250,7 @@ export class Fireworks {
     this.canvas.style.height = '100%';
     // landTop = top of the land silhouette; waterY = ground / waterline (rockets, fountains start here)
     if (this.scene === 'lake') { this.landTop = H * (wide ? 0.6 : 0.505); this.waterY = H * (wide ? 0.68 : 0.575); }
+    else if (this.scene === 'town') { this.landTop = H * (wide ? 0.5 : 0.58); this.waterY = H * (wide ? 0.64 : 0.72); }
     else if (this.scene === 'field') { this.landTop = H * (wide ? 0.68 : 0.7); this.waterY = H * (wide ? 0.8 : 0.8); }
     else { this.landTop = H * (wide ? 0.85 : 0.87); this.waterY = H * (wide ? 0.92 : 0.93); }
     this.fx.width = Math.round(W * dpr);
@@ -256,7 +266,14 @@ export class Fireworks {
     this.refl.height = lake ? Math.ceil((H - this.waterY) * rs) : 1;
     this.buildSky();
     this.buildWater();
-    if (this.scene === 'lake') this.buildLand(); else this.buildFieldLand();
+    if (this.scene === 'town') {
+      this.town = buildTown(W, H, this.landTop, this.waterY, dpr, this.U, this.land, this.fg, this.litMask);
+      this.litTmp.width = this.litMask.width; this.litTmp.height = this.litMask.height;
+    } else {
+      this.town = null;
+      for (const c of [this.fg, this.litMask, this.litTmp]) { c.width = 1; c.height = 1; }
+      if (this.scene === 'lake') this.buildLand(); else this.buildFieldLand();
+    }
     this.stars = [];
     const ns = Math.round((W * this.landTop) / 2600);
     // stars fill the whole sky above the land, whatever the orientation
@@ -290,6 +307,7 @@ export class Fireworks {
     const grad = g.createLinearGradient(0, 0, 0, this.water.height);
     if (this.scene === 'lake') { grad.addColorStop(0, '#05060c'); grad.addColorStop(1, '#000000'); }
     else if (this.scene === 'field') { grad.addColorStop(0, '#07090a'); grad.addColorStop(1, '#010101'); }
+    else if (this.scene === 'town') { grad.addColorStop(0, '#050507'); grad.addColorStop(1, '#020203'); }
     else { grad.addColorStop(0, '#030305'); grad.addColorStop(1, '#000000'); }
     g.fillStyle = grad;
     g.fillRect(0, 0, cw, this.water.height);
@@ -402,6 +420,75 @@ export class Fireworks {
       g.lineTo(gx, base - (Math.random() < 0.35 ? rand(1, 5) * U : 0));
     }
     g.lineTo(W, waterY); g.closePath(); g.fill();
+  }
+
+  /** 小鎮車站: sum burst lights into 8 screen columns (cheap: lights ≤ ~12) + whole-sky colour wash */
+  private aggregateLight() {
+    const { W, waterY, ctx } = this;
+    const c = this.litCols;
+    c.fill(0);
+    let tot = 0, tr = 0, tg = 0, tb = 0;
+    for (const l of this.lights) {
+      const [r, g, b] = hexRgb(l.color);
+      // lower bursts are closer to the town -> stronger; falls off horizontally
+      const hf = 0.45 + 0.55 * Math.min(1, Math.max(0, l.y / waterY));
+      for (let k = 0; k < 8; k++) {
+        const dx = ((k + 0.5) / 8) * W - l.x;
+        const w = l.i * hf * Math.exp(-((dx / W) ** 2) * 6);
+        c[k * 4] += r * w; c[k * 4 + 1] += g * w; c[k * 4 + 2] += b * w; c[k * 4 + 3] += w;
+      }
+      const w = l.i * hf; tot += w; tr += r * w; tg += g * w; tb += b * w;
+    }
+    this.litTotal = tot;
+    if (tot < 0.02) return;
+    // sky wash: the whole sky takes on the burst colour, strongest near the horizon
+    const a = Math.min(1, tot * 0.5);
+    const r = (tr / tot) | 0, g = (tg / tot) | 0, b = (tb / tot) | 0;
+    const sg = ctx.createLinearGradient(0, 0, 0, waterY);
+    sg.addColorStop(0, `rgba(${r},${g},${b},${0.03 * a})`);
+    sg.addColorStop(1, `rgba(${r},${g},${b},${0.11 * a})`);
+    ctx.fillStyle = sg;
+    ctx.fillRect(0, 0, W, waterY);
+  }
+
+  /** tint the white "lightable" mask with the per-column burst colour and add it on top (3 blits) */
+  private renderTownLight() {
+    const t = this.town!;
+    const { ctx, dpr, W, time, U } = this;
+    if (this.litTotal >= 0.02) {
+      const tc = this.litTmp.getContext('2d')!;
+      tc.globalCompositeOperation = 'copy';
+      tc.drawImage(this.litMask, 0, 0);
+      tc.globalCompositeOperation = 'source-in';
+      const gr = tc.createLinearGradient(0, 0, this.litTmp.width, 0);
+      const c = this.litCols;
+      for (let k = 0; k < 8; k++) {
+        const w = c[k * 4 + 3];
+        const br = w > 0.001 ? Math.min(1, w * 1.5) / w : 0;
+        gr.addColorStop((k + 0.5) / 8, `rgb(${Math.min(255, c[k * 4] * br) | 0},${Math.min(255, c[k * 4 + 1] * br) | 0},${Math.min(255, c[k * 4 + 2] * br) | 0})`);
+      }
+      tc.fillStyle = gr;
+      tc.fillRect(0, 0, this.litTmp.width, this.litTmp.height);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(this.litTmp, 0, t.maskY0 * dpr, this.litTmp.width * dpr, this.litTmp.height * dpr);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    // tiny animated touches: blinking tower light, a moth circling the first lamp
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (Math.sin(time * 2.6) > 0.55) {
+      ctx.fillStyle = 'rgba(255,50,40,0.95)';
+      ctx.fillRect(t.tower.x - 1 * U, t.tower.y - 1 * U, 2 * U, 2 * U);
+    }
+    const l = t.lamps[0];
+    if (l) {
+      const s = (this.H - this.waterY) / (this.W > this.H ? 170 : 236);
+      const mx = l.x - 5 * s + Math.cos(time * 6.3) * 7 * s + Math.sin(time * 2.9) * 3 * s;
+      const my = l.y + 8 * s + Math.sin(time * 4.7) * 5 * s;
+      ctx.fillStyle = 'rgba(255,240,210,0.8)';
+      ctx.fillRect(mx, my, 1.3 * s + 0.5, 1.1 * s + 0.5);
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    void W;
   }
 
   /** switch scene: rebuilds layout and caches */
@@ -1255,6 +1342,7 @@ export class Fireworks {
       ctx.fillRect(-hr, -hr, hr * 2, hr);
       ctx.restore();
     }
+    if (this.town) this.aggregateLight();
     // smoke
     this.renderSmoke();
 
@@ -1313,6 +1401,10 @@ export class Fireworks {
     if (this.scene !== 'lake') {
       // no water: just the cached ground fill, no snapshot / strip passes
       ctx.drawImage(this.water, 0, this.canvas.height - this.water.height);
+      if (this.town) {
+        ctx.drawImage(this.fg, 0, Math.round(this.town.fgY0 * dpr));
+        this.renderTownLight();
+      }
       return;
     }
     // reflection snapshot (flip area above waterline)

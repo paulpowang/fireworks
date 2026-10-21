@@ -59,7 +59,9 @@ export default function App() {
   const [finaleMenu, setFinaleMenu] = useState(false);
   // scene: default 'field' (no water reflection = lighter rendering); remembered
   const [scene, setScene] = useState<SceneId>(() => {
-    try { const v = localStorage.getItem('fw.scene') as SceneId | null; return v && SCENES.some((x) => x.id === v) ? v : 'field'; } catch { return 'field'; }
+    // 'fw.sceneChoice' is only written when the user picks a scene (the old 'fw.scene' key was
+    // auto-saved on load, so it is ignored and new visitors get the new default 小鎮車站)
+    try { const v = localStorage.getItem('fw.sceneChoice') as SceneId | null; return v && SCENES.some((x) => x.id === v) ? v : 'town'; } catch { return 'town'; }
   });
   const [sceneMenu, setSceneMenu] = useState(false);
   const [fwReady, setFwReady] = useState<Fireworks | null>(null);
@@ -168,7 +170,6 @@ export default function App() {
   useEffect(() => { fwRef.current?.setTheme(theme); }, [theme]);
   useEffect(() => {
     fwRef.current?.setScene(scene);
-    try { localStorage.setItem('fw.scene', scene); } catch { /* ignore */ }
   }, [scene]);
   useEffect(() => { if (fwRef.current) fwRef.current.mirror = mirror; }, [mirror]);
   useEffect(() => { fwRef.current?.setAuto(auto); }, [auto]);
@@ -329,7 +330,7 @@ export default function App() {
             <button
               key={sc.id}
               className={'chip' + (scene === sc.id ? ' on' : '')}
-              onClick={ui(() => { setScene(sc.id); setSceneMenu(false); flash(sc.label); })}
+              onClick={ui(() => { setScene(sc.id); try { localStorage.setItem('fw.sceneChoice', sc.id); } catch { /* ignore */ } setSceneMenu(false); flash(sc.label); })}
             >
               {sc.label}
             </button>

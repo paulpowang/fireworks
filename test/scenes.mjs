@@ -6,14 +6,14 @@ const pw = require('playwright-core');
 const base = process.argv[2] || 'http://127.0.0.1:4173/fireworks/';
 const mode = process.argv[3] || 'all';
 const browser = await pw.chromium.launch({ executablePath: '/opt/google/chrome/chrome' });
-const SC = [['field', '河岸草地'], ['lake', '湖面倒影'], ['sky', '純夜空']];
+const SC = (process.env.SCENES || 'town,field,lake,sky').split(',').map((id) => [id, { town: '小鎮車站', field: '河岸草地', lake: '湖面倒影', sky: '純夜空' }[id]]);
 const seed = `(() => { let s = 12345; Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; })();`;
 const out = { shots: [], perf: [], persist: null, errors: [] };
 
 async function newPage(vw, vh, sceneId) {
   const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
   await ctx.addInitScript(seed);
-  if (sceneId) await ctx.addInitScript(`try{localStorage.setItem('fw.scene','${sceneId}')}catch(e){}`);
+  if (sceneId) await ctx.addInitScript(`try{localStorage.setItem('fw.sceneChoice','${sceneId}')}catch(e){}`);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => out.errors.push(String(e)));
   page.on('console', (m) => m.type() === 'error' && out.errors.push(m.text()));
@@ -44,19 +44,19 @@ if (mode === 'all' || mode === 'shots') {
   }
   // rotated (CSS 90deg fallback): emulate iOS by removing orientation.lock
   {
-    const { ctx, page } = await newPage(390, 844, 'field');
+    const { ctx, page } = await newPage(390, 844);
     await ctx.addInitScript(() => { try { Object.defineProperty(screen.orientation, 'lock', { value: undefined }); } catch {} });
     await page.goto(base + '?debug&q=1', { waitUntil: 'networkidle' });
     await page.waitForTimeout(1200);
     await page.locator('.pill', { hasText: '橫屏' }).tap();
     await page.waitForTimeout(800);
     await page.locator('.pill', { hasText: '換場景' }).tap();
-    await page.locator('.scenemenu .chip', { hasText: '河岸草地' }).tap();
+    await page.locator('.scenemenu .chip', { hasText: '小鎮車站' }).tap();
     await page.locator('.chip', { hasText: '地面火花' }).first().tap();
     await page.touchscreen.tap(195, 420);
     await page.waitForTimeout(1500);
     const rot = await page.evaluate(() => ({ cls: document.querySelector('.app').className, W: window.__fw.W, H: window.__fw.H, scene: window.__fw.scene }));
-    await page.screenshot({ path: `test/shots/scene-field-rotated.png` });
+    await page.screenshot({ path: `test/shots/scene-town-rotated.png` });
     out.shots.push({ tag: 'rotated', ...rot });
     await ctx.close();
   }
@@ -68,7 +68,7 @@ if (mode === 'all' || mode === 'shots') {
     await page.locator('.scenemenu .chip', { hasText: '湖面倒影' }).tap();
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForTimeout(500);
-    out.persist = await page.evaluate(() => ({ stored: localStorage.getItem('fw.scene'), scene: window.__fw.scene }));
+    out.persist = await page.evaluate(() => ({ stored: localStorage.getItem('fw.sceneChoice'), scene: window.__fw.scene }));
     await ctx.close();
   }
 }

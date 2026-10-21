@@ -17,9 +17,10 @@ export type ShellType =
   | 'starmine' // 速射連發
   | 'giant'; // internal: 長岡 giant chrysanthemum (finale only)
 
-export type SceneId = 'field' | 'lake' | 'sky';
+export type SceneId = 'town' | 'field' | 'lake' | 'sky';
 /** scenes: only 'lake' renders water + reflection (the most expensive passes) */
 export const SCENES: { id: SceneId; label: string }[] = [
+  { id: 'town', label: '小鎮車站' },
   { id: 'field', label: '河岸草地' },
   { id: 'lake', label: '湖面倒影' },
   { id: 'sky', label: '純夜空' },
