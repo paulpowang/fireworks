@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Fireworks } from './engine/fireworks';
 import { Sfx } from './engine/audio';
 import MusicPanel from './MusicPanel';
-import { FINALES, SHELLS, THEMES, type FinaleKind, type ShellType, type ThemeId } from './engine/themes';
+import { FINALES, SCENES, SHELLS, THEMES, type FinaleKind, type SceneId, type ShellType, type ThemeId } from './engine/themes';
 
 type Result = { blob: Blob; url: string; name: string; kind: 'video' | 'image' };
 
@@ -57,6 +57,11 @@ export default function App() {
     try { return (localStorage.getItem('fw.finale') as FinaleKind | 'random') || 'classic'; } catch { return 'classic'; }
   });
   const [finaleMenu, setFinaleMenu] = useState(false);
+  // scene: default 'field' (no water reflection = lighter rendering); remembered
+  const [scene, setScene] = useState<SceneId>(() => {
+    try { const v = localStorage.getItem('fw.scene') as SceneId | null; return v && SCENES.some((x) => x.id === v) ? v : 'field'; } catch { return 'field'; }
+  });
+  const [sceneMenu, setSceneMenu] = useState(false);
   const [fwReady, setFwReady] = useState<Fireworks | null>(null);
   const [mirror, setMirror] = useState(false);
   const [auto, setAuto] = useState(false);
@@ -126,7 +131,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    const fw = new Fireworks(canvasRef.current!, sfxRef.current);
+    const fw = new Fireworks(canvasRef.current!, sfxRef.current, scene);
     fwRef.current = fw;
     setFwReady(fw);
     fw.onInteract = () => {
@@ -161,6 +166,10 @@ export default function App() {
 
   useEffect(() => { if (fwRef.current) fwRef.current.shell = shell; }, [shell]);
   useEffect(() => { fwRef.current?.setTheme(theme); }, [theme]);
+  useEffect(() => {
+    fwRef.current?.setScene(scene);
+    try { localStorage.setItem('fw.scene', scene); } catch { /* ignore */ }
+  }, [scene]);
   useEffect(() => { if (fwRef.current) fwRef.current.mirror = mirror; }, [mirror]);
   useEffect(() => { fwRef.current?.setAuto(auto); }, [auto]);
   useEffect(() => {
@@ -314,6 +323,19 @@ export default function App() {
           ))}
         </div>
       )}
+      {sceneMenu && (
+        <div className="scenemenu" onPointerDown={(e) => e.stopPropagation()}>
+          {SCENES.map((sc) => (
+            <button
+              key={sc.id}
+              className={'chip' + (scene === sc.id ? ' on' : '')}
+              onClick={ui(() => { setScene(sc.id); setSceneMenu(false); flash(sc.label); })}
+            >
+              {sc.label}
+            </button>
+          ))}
+        </div>
+      )}
       {recSec !== null && <div className="recbadge">● 錄影中 {recSec}s</div>}
       {debug && <div className="stats">{stats}</div>}
 
@@ -345,6 +367,7 @@ export default function App() {
         )}
         <div className="themes">
           <button className={'pill small' + (musicOpen ? ' on' : '')} onClick={ui(() => setMusicOpen((o) => !o))}>♪ 配樂</button>
+          <button className={'pill small' + (sceneMenu ? ' on' : '')} onClick={ui(() => setSceneMenu((o) => !o))}>換場景</button>
           {THEMES.map((t) => (
             <button
               key={t.id}

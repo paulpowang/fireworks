@@ -1,5 +1,5 @@
 import { Sfx } from './audio';
-import { SET_PIECES, THEMES, type FinaleKind, type ShellType, type Theme, type ThemeId } from './themes';
+import { SET_PIECES, THEMES, type FinaleKind, type SceneId, type ShellType, type Theme, type ThemeId } from './themes';
 
 const TAU = Math.PI * 2;
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -142,6 +142,8 @@ export class Fireworks {
   private running = false;
 
   theme: Theme = THEMES[0];
+  /** 'field' (default, no water) | 'lake' (water + reflection) | 'sky' (sky only) */
+  scene: SceneId = 'field';
   shell: ShellType | 'random' = 'senrin';
   mirror = false;
   auto = false;
@@ -168,7 +170,8 @@ export class Fireworks {
   /** called on every main burst (debug / tests) */
   onBurst?: (type: ShellType, x: number, y: number) => void;
 
-  constructor(canvas: HTMLCanvasElement, sfx: Sfx) {
+  constructor(canvas: HTMLCanvasElement, sfx: Sfx, scene?: SceneId) {
+    if (scene) this.scene = scene;
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
     this.sfx = sfx;
@@ -236,9 +239,10 @@ export class Fireworks {
     this.canvas.height = Math.round(H * dpr);
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
-    // portrait: land strip around 52-58%; landscape a bit lower
-    this.landTop = H * (wide ? 0.6 : 0.505);
-    this.waterY = H * (wide ? 0.68 : 0.575);
+    // landTop = top of the land silhouette; waterY = ground / waterline (rockets, fountains start here)
+    if (this.scene === 'lake') { this.landTop = H * (wide ? 0.6 : 0.505); this.waterY = H * (wide ? 0.68 : 0.575); }
+    else if (this.scene === 'field') { this.landTop = H * (wide ? 0.68 : 0.7); this.waterY = H * (wide ? 0.8 : 0.8); }
+    else { this.landTop = H * (wide ? 0.85 : 0.87); this.waterY = H * (wide ? 0.92 : 0.93); }
     this.fx.width = Math.round(W * dpr);
     this.fx.height = Math.round(this.waterY * dpr);
     this.b1.width = Math.ceil(this.fx.width / 4 / dpr * 1);
@@ -246,11 +250,13 @@ export class Fireworks {
     this.b2.width = Math.ceil(this.b1.width / 2);
     this.b2.height = Math.ceil(this.b1.height / 2);
     const rs = 0.5;
-    this.refl.width = Math.ceil(W * rs);
-    this.refl.height = Math.ceil((H - this.waterY) * rs);
+    const lake = this.scene === 'lake';
+    // no reflection buffer at all unless the lake scene is active
+    this.refl.width = lake ? Math.ceil(W * rs) : 1;
+    this.refl.height = lake ? Math.ceil((H - this.waterY) * rs) : 1;
     this.buildSky();
     this.buildWater();
-    this.buildLand();
+    if (this.scene === 'lake') this.buildLand(); else this.buildFieldLand();
     this.stars = [];
     const ns = Math.round((W * this.landTop) / 2600);
     // stars fill the whole sky above the land, whatever the orientation
@@ -274,6 +280,7 @@ export class Fireworks {
     dither(g, cw, ch, 2.2);
   }
 
+  /** below the ground line: water base (lake) or a static ground/field fill (other scenes) */
   private buildWater() {
     const cw = this.canvas.width, ch = this.canvas.height;
     const wy = Math.floor(this.waterY * this.dpr);
@@ -281,8 +288,9 @@ export class Fireworks {
     this.water.height = Math.max(1, ch - wy);
     const g = this.water.getContext('2d', { willReadFrequently: true })!;
     const grad = g.createLinearGradient(0, 0, 0, this.water.height);
-    grad.addColorStop(0, '#05060c');
-    grad.addColorStop(1, '#000000');
+    if (this.scene === 'lake') { grad.addColorStop(0, '#05060c'); grad.addColorStop(1, '#000000'); }
+    else if (this.scene === 'field') { grad.addColorStop(0, '#07090a'); grad.addColorStop(1, '#010101'); }
+    else { grad.addColorStop(0, '#030305'); grad.addColorStop(1, '#000000'); }
     g.fillStyle = grad;
     g.fillRect(0, 0, cw, this.water.height);
     dither(g, cw, this.water.height, 2.2);
@@ -339,6 +347,69 @@ export class Fireworks {
     // shoreline line
     g.fillStyle = 'rgba(255,190,120,0.18)';
     g.fillRect(0, waterY - 1, W, 1);
+  }
+
+  /** non-water scenes: hills + distant skyline + riverbank field (field) or a low horizon only (sky) */
+  private buildFieldLand() {
+    const { W, landTop, waterY, dpr, U } = this;
+    this.land.width = Math.round(W * dpr);
+    this.land.height = Math.round(waterY * dpr);
+    const g = this.land.getContext('2d')!;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, waterY);
+    const seed = Math.random() * 100;
+    const ridge = (base: number, a1: number, a2: number, color: string) => {
+      g.fillStyle = color;
+      g.beginPath();
+      g.moveTo(0, waterY);
+      for (let x = 0; x <= W + 8; x += 8) g.lineTo(x, base + Math.sin(x * 0.005 + seed) * a1 * U + Math.sin(x * 0.019 + seed * 3) * a2 * U);
+      g.lineTo(W, waterY);
+      g.closePath();
+      g.fill();
+    };
+    if (this.scene === 'sky') {
+      ridge(landTop + 18 * U, 6, 3, '#05060b');
+      ridge(waterY - 8 * U, 3, 2, '#020203');
+      return;
+    }
+    // far hills
+    ridge(landTop + 6 * U, 12, 5, '#080a12');
+    // distant skyline with lights on the far bank
+    const skyBase = landTop + 34 * U;
+    g.fillStyle = '#05060b';
+    g.beginPath();
+    g.moveTo(0, waterY);
+    let x = 0;
+    const lights: [number, number][] = [];
+    while (x < W) {
+      const bw = rand(5, 18) * U;
+      const bh = Math.random() < 0.12 ? rand(16, 30) * U : rand(3, 11) * U;
+      g.lineTo(x, skyBase - bh); g.lineTo(x + bw, skyBase - bh);
+      if (Math.random() < 0.7) lights.push([x + rand(1, bw - 1), skyBase - rand(1, bh)]);
+      x += bw;
+    }
+    g.lineTo(W, waterY); g.closePath(); g.fill();
+    for (const [lx, ly] of lights) {
+      g.fillStyle = pick(['rgba(255,210,140,', 'rgba(255,240,210,', 'rgba(140,200,255,']) + rand(0.2, 0.7) + ')';
+      g.fillRect(lx, ly, rand(0.7, 1.5) * U, rand(0.7, 1.2) * U);
+    }
+    // riverbank / field in front: gentle rise with grass tufts on the edge
+    g.fillStyle = '#020303';
+    g.beginPath();
+    g.moveTo(0, waterY);
+    for (let gx = 0; gx <= W + 4; gx += 4) {
+      const base = waterY - 14 * U + Math.sin(gx * 0.004 + seed * 2) * 6 * U;
+      g.lineTo(gx, base - (Math.random() < 0.35 ? rand(1, 5) * U : 0));
+    }
+    g.lineTo(W, waterY); g.closePath(); g.fill();
+  }
+
+  /** switch scene: rebuilds layout and caches */
+  setScene(id: SceneId) {
+    if (id === this.scene) return;
+    this.scene = id;
+    this.W = 0; // force a full resize/rebuild
+    this.resize();
   }
 
   setTheme(id: ThemeId) {
@@ -1239,6 +1310,11 @@ export class Fireworks {
     ctx.globalAlpha = 1;
     ctx.drawImage(this.land, 0, 0);
 
+    if (this.scene !== 'lake') {
+      // no water: just the cached ground fill, no snapshot / strip passes
+      ctx.drawImage(this.water, 0, this.canvas.height - this.water.height);
+      return;
+    }
     // reflection snapshot (flip area above waterline)
     const rc = this.reflc;
     const rw = this.refl.width, rh = this.refl.height;

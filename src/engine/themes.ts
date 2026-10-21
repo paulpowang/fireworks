@@ -17,6 +17,14 @@ export type ShellType =
   | 'starmine' // 速射連發
   | 'giant'; // internal: 長岡 giant chrysanthemum (finale only)
 
+export type SceneId = 'field' | 'lake' | 'sky';
+/** scenes: only 'lake' renders water + reflection (the most expensive passes) */
+export const SCENES: { id: SceneId; label: string }[] = [
+  { id: 'field', label: '河岸草地' },
+  { id: 'lake', label: '湖面倒影' },
+  { id: 'sky', label: '純夜空' },
+];
+
 export type FinaleKind = 'classic' | 'nagaoka' | 'phoenix';
 export const FINALES: { id: FinaleKind | 'random'; label: string }[] = [
   { id: 'classic', label: '經典終章' },

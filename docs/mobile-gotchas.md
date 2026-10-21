@@ -22,3 +22,10 @@
 - iOS Safari 沒有 `navigator.vibrate`；Chrome 在使用者第一次點擊前呼叫 vibrate 會在 console 報錯 → 先檢查 `navigator.userActivation.hasBeenActive`。
 - 錄影：`canvas.captureStream(30)` + 音訊 `MediaStreamDestination` 的 track → `MediaRecorder`；iOS / 新版 Chrome 給 mp4，其餘 webm。`navigator.share({files})` 需要 Web Share Level 2，否則改下載。分享要在使用者手勢內呼叫（所以錄完先跳出「分享 / 下載」面板）。
 - 音樂檔：`accept="audio/*"`，iOS 會開「檔案」App。
+
+## 換場景 / 倒影成本
+- 倒影 pass 會 `drawImage(主 canvas)`，在手機上等於每幀一次 GPU readback；這是最貴的一步。所以預設場景改成沒有倒影的「河岸草地」，湖面倒影變成選項。
+- 換場景不能只是「藏起來」：非湖面場景完全不建倒影 buffer、不跑 strip 迴圈。
+- 地面線位置跟著場景變（直式 河岸草地 80%、純夜空 93%）。直式時底部選單會蓋住地面線附近，火箭從選單後面升起是正常的。
+- CSS 旋轉的橫屏模式下，`resize()` 讀的是容器未旋轉的 clientWidth/Height，所以場景 layout 一樣正確（已在 headless 驗證）。
+

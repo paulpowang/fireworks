@@ -135,3 +135,13 @@ label.pill { display: inline-flex; align-items: center; cursor: pointer; white-s
 }
 .app.land .finmenu { top: calc(env(safe-area-inset-top) + 40px); }
 .app.rot .finmenu { top: 40px; left: 10px; }
+
+/* ---- scene picker ---- */
+.scenemenu {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 92px);
+  display: flex; gap: 6px; padding: 8px; border-radius: 14px; white-space: nowrap;
+  background: rgba(12,12,20,0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12);
+}
+.app.land .scenemenu { bottom: calc(env(safe-area-inset-bottom) + 42px); }
+.app.rot .scenemenu { bottom: 42px; }
+@media (max-width: 420px) { .app:not(.land) .themes { gap: 9px; } .app:not(.land) .theme { width: 22px; height: 22px; } }
