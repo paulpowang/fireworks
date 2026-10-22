@@ -10,6 +10,7 @@ const playSec = +(process.argv[5] || 20);
 const truth = JSON.parse(fs.readFileSync(`test/${track}.json`, 'utf8'));
 const browser = await pw.chromium.launch({ executablePath: '/opt/google/chrome/chrome', args: ['--autoplay-policy=no-user-gesture-required'] });
 const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+if (process.env.SCENE) await ctx.addInitScript(`try{localStorage.setItem('fw.sceneChoice','${process.env.SCENE}')}catch(e){}`);
 const page = await ctx.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e)));

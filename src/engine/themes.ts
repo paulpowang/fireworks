@@ -17,20 +17,25 @@ export type ShellType =
   | 'starmine' // 速射連發
   | 'giant'; // internal: 長岡 giant chrysanthemum (finale only)
 
-export type SceneId = 'town' | 'field' | 'lake' | 'sky';
+export type SceneId = 'town' | 'field' | 'lake' | 'sky' | 'tw101' | 'needle';
+/** landmark scenes: fireworks launch FROM the building (emitters on its corners / ledges / spire) */
+export const LANDMARK_SCENES: SceneId[] = ['tw101', 'needle'];
 /** scenes: only 'lake' renders water + reflection (the most expensive passes) */
 export const SCENES: { id: SceneId; label: string }[] = [
   { id: 'town', label: '小鎮車站' },
   { id: 'field', label: '河岸草地' },
   { id: 'lake', label: '湖面倒影' },
   { id: 'sky', label: '純夜空' },
+  { id: 'tw101', label: '台北 101' },
+  { id: 'needle', label: '西雅圖 Space Needle' },
 ];
 
-export type FinaleKind = 'classic' | 'nagaoka' | 'phoenix';
+export type FinaleKind = 'classic' | 'nagaoka' | 'phoenix' | 'tower';
 export const FINALES: { id: FinaleKind | 'random'; label: string }[] = [
   { id: 'classic', label: '經典終章' },
   { id: 'nagaoka', label: '長岡巨型' },
   { id: 'phoenix', label: '鳳凰亂舞' },
+  { id: 'tower', label: '大樓秀' }, // landmark scenes only
   { id: 'random', label: '隨機' },
 ];
 /** set pieces fire from the ground / in place, no shell rocket */

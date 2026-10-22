@@ -74,7 +74,7 @@ export default function MusicPanel({ fw, sfx, theme, finale, onClose, onPlayingC
         if (late < 0) continue;
         e.launched = true;
         if (late > Math.max(0.25, flight * 0.7)) continue; // too late (e.g. right after a seek): skip
-        if (e.type === 'finale') fw.finale(e.finale!);
+        if (e.type === 'finale') fw.finale(e.finale!, false);
         else fw.launchTimed(e.x, yn, e.type, flight, late, e.scale);
       }
     };

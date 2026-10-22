@@ -1,7 +1,8 @@
 import { buildTown, type TownLayers } from './town';
 import { buildRiverbank } from './riverbank';
+import { buildLandmark, landmarkLayout, type LandmarkEmitter, type LandmarkLayers } from './landmark';
 import { Sfx } from './audio';
-import { SET_PIECES, THEMES, type FinaleKind, type SceneId, type ShellType, type Theme, type ThemeId } from './themes';
+import { LANDMARK_SCENES, SET_PIECES, THEMES, type FinaleKind, type SceneId, type ShellType, type Theme, type ThemeId } from './themes';
 
 const TAU = Math.PI * 2;
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -103,6 +104,8 @@ interface Emitter {
   kind: 'fountain';
   x: number; y: number; w: number; t: number; dur: number; rate: number; acc: number;
   colors: string[]; power: number;
+  /** building gerbs: direction / cone half-width / star life (defaults: straight-up ground fountain) */
+  ang?: number; spread?: number; life?: number;
 }
 interface Fan { x: number; y: number; t: number; next: number; wave: number; waves: number; pal: string[] }
 interface Puff { x: number; y: number; vx: number; vy: number; r: number; age: number; life: number; a: number }
@@ -135,6 +138,12 @@ export class Fireworks {
   /** per-frame aggregated burst light per screen column: r,g,b,weight */
   private litCols = new Float32Array(8 * 4);
   private litTotal = 0;
+  // landmark scenes (台北 101 / Space Needle): building layers, emitters and the window-flash overlay
+  private lm: LandmarkLayers | null = null;
+  private flashC = makeCanvas();
+  private flashTmp = makeCanvas();
+  private bldFlash = { i: 0, color: '#ffffff' };
+  private lastCrackle = 0;
 
   W = 1; H = 1; U = 1; dpr = 1;
   landTop = 0; waterY = 0;
@@ -160,6 +169,8 @@ export class Fireworks {
   mirror = false;
   auto = false;
   private autoNext = 0;
+  /** auto show in a landmark scene runs the 大樓秀 every ~50 s */
+  private autoTower = 0;
   private textPts: [number, number][] = [];
   private lastVib = 0;
 
@@ -255,6 +266,7 @@ export class Fireworks {
     if (this.scene === 'lake') { this.landTop = H * (wide ? 0.6 : 0.505); this.waterY = H * (wide ? 0.68 : 0.575); }
     else if (this.scene === 'town') { this.landTop = H * (wide ? 0.5 : 0.58); this.waterY = H * (wide ? 0.64 : 0.72); }
     else if (this.scene === 'field') { this.landTop = H * (wide ? 0.68 : 0.7); this.waterY = H * (wide ? 0.8 : 0.8); }
+    else if (this.isLandmark()) { const L = landmarkLayout(this.scene as 'tw101' | 'needle', W, H); this.landTop = L.landTop; this.waterY = L.groundY; }
     else { this.landTop = H * (wide ? 0.85 : 0.87); this.waterY = H * (wide ? 0.92 : 0.93); }
     this.fx.width = Math.round(W * dpr);
     this.fx.height = Math.round(this.waterY * dpr);
@@ -273,11 +285,19 @@ export class Fireworks {
       // lit scenes: pre-rendered silhouettes + lightable mask, tinted per frame by the bursts
       this.town = (this.scene === 'town' ? buildTown : buildRiverbank)(W, H, this.landTop, this.waterY, dpr, this.U, this.land, this.fg, this.litMask);
       this.litTmp.width = this.litMask.width; this.litTmp.height = this.litMask.height;
+      this.lm = null;
+    } else if (this.isLandmark()) {
+      // landmark: same lit-layer path as the town + building emitters and a flash overlay
+      this.lm = buildLandmark(this.scene as 'tw101' | 'needle', W, H, this.landTop, this.waterY, dpr, this.U, this.land, this.fg, this.litMask, this.flashC);
+      this.town = this.lm;
+      this.litTmp.width = this.litMask.width; this.litTmp.height = this.litMask.height;
+      this.flashTmp.width = this.flashC.width; this.flashTmp.height = this.flashC.height;
     } else {
-      this.town = null;
+      this.town = null; this.lm = null;
       for (const c of [this.fg, this.litMask, this.litTmp]) { c.width = 1; c.height = 1; }
       if (this.scene === 'lake') this.buildLand(); else this.buildFieldLand();
     }
+    if (!this.lm) for (const c of [this.flashC, this.flashTmp]) { c.width = 1; c.height = 1; }
     this.stars = [];
     const ns = Math.round((W * this.landTop) / 2600);
     // stars fill the whole sky above the land, whatever the orientation
@@ -477,6 +497,21 @@ export class Fireworks {
       ctx.drawImage(this.litTmp, 0, t.maskY0 * dpr, this.litTmp.width * dpr, this.litTmp.height * dpr);
       ctx.globalCompositeOperation = 'source-over';
     }
+    // landmark: tinted outline / window-band flash
+    const lm = this.lm;
+    if (lm && this.bldFlash.i > 0.03) {
+      const fc = this.flashTmp.getContext('2d')!;
+      fc.globalCompositeOperation = 'copy';
+      fc.drawImage(this.flashC, 0, 0);
+      fc.globalCompositeOperation = 'source-in';
+      fc.fillStyle = this.bldFlash.color;
+      fc.fillRect(0, 0, this.flashTmp.width, this.flashTmp.height);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, this.bldFlash.i);
+      ctx.drawImage(this.flashTmp, lm.flashX0 * dpr, lm.flashY0 * dpr, this.flashTmp.width * dpr, this.flashTmp.height * dpr);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
     // tiny animated touches: blinking tower light, a moth circling the first lamp
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (t.tower && Math.sin(time * 2.6) > 0.55) {
@@ -645,6 +680,7 @@ export class Fireworks {
     const { W, U } = this;
     if (this.mirror && x > W / 2) x = W - x;
     if (SET_PIECES.includes(t)) { this.setPiece(t, x, y); return; }
+    if (this.lm) { this.lmTap(x, y, t, sizeMul); return; }
     const minY = 60 * U;
     const maxY = this.landTop - 70 * U;
     const ty = Math.max(minY, Math.min(maxY, y));
@@ -675,7 +711,16 @@ export class Fireworks {
     const { W, U, landTop, waterY } = this;
     const wide = W > this.H;
     const pan = (x / W) * 2 - 1;
-    if (t === 'fan') {
+    if (this.lm && t === 'fan') {
+      // fan of rays from the spire tip
+      this.fans.push({ x: this.lm.topX, y: this.lm.topY, t: 0, next: 0, wave: 0, waves: 3, pal: pick(this.theme.palettes) });
+      this.sfx.launch(pan, 0.5);
+    } else if (this.lm && t === 'ground') {
+      // building version of 地面火花: every level's gerbs from the bottom up + ledge mines
+      const lm = this.lm, cols = [['#ff7ab8', '#ffd1ea'], ['#ff9a3c', '#ffd27a'], ['#ffffff', '#fff1c2']];
+      for (let i = 0; i < lm.tiers - 1; i++) this.timed.push({ t: this.time + i * 0.22, fn: () => this.lmTier(i, cols[i % 3], 'gerb', 2.2) });
+      this.flashBuilding('#ffd27a', 0.8);
+    } else if (t === 'fan') {
       this.fans.push({ x, y: waterY - 4 * U, t: 0, next: 0, wave: 0, waves: 3, pal: pick(this.theme.palettes) });
       this.sfx.launch(pan, 0.5);
     } else if (t === 'ground') {
@@ -735,6 +780,20 @@ export class Fireworks {
     if (SET_PIECES.includes(type)) { this.setPiece(type, x, yn * this.H); return; }
     const ty = Math.max(60 * U, Math.min(this.landTop - 70 * U, yn * this.H));
     const tx = Math.max(20, Math.min(W - 20, x));
+    if (this.lm) {
+      // landmark: the shell leaves the building, burst still locked to the music clock
+      const now = this.musicClock?.();
+      const ba = now != null ? now + flight - Math.max(0, late) : undefined;
+      if (this.lmShell(tx, ty, type, flight, undefined, scale, ba, late)) {
+        // and on some beats the facade answers at the moment of the burst
+        if (Math.random() < 0.35) {
+          const lm = this.lm, tier = (Math.random() * (lm.tiers - 1)) | 0, pal = pick(this.theme.palettes);
+          const mode = Math.random() < 0.5 ? 'comet' : 'gerb';
+          this.timed.push({ t: this.time + Math.max(0, flight - late), fn: () => { this.lmTier(tier, [pal[0], '#fff1c2'], mode, 0.9); this.flashBuilding(pal[0], 0.5); } });
+        }
+        return;
+      }
+    }
     const sx = Math.max(10, Math.min(W - 10, tx + rand(-0.05, 0.05) * W));
     const sy = this.waterY - 3 * U;
     const pal = pick(this.theme.palettes);
@@ -1066,23 +1125,255 @@ export class Fireworks {
     }
   }
 
+  // ---------- landmark scenes: fireworks FROM the building ----------
+  isLandmark() { return LANDMARK_SCENES.includes(this.scene); }
+
+  /** light the building outline / window bands (tinted overlay, decays) */
+  private flashBuilding(color: string, i = 1) {
+    if (!this.lm) return;
+    this.bldFlash.color = color;
+    this.bldFlash.i = Math.max(this.bldFlash.i, i);
+  }
+
+  private crackleThrottled(pan: number) {
+    if (this.time - this.lastCrackle < 0.3) return;
+    this.lastCrackle = this.time;
+    this.sfx.crackle(pan, 0);
+  }
+
+  /** gerb (fountain) spray from a building point; `ang` overrides the emitter's outward direction */
+  private lmGerb(e: LandmarkEmitter, colors: string[], dur = 1.2, power = 0.62, ang?: number, life = 0.75, spread = 0.2) {
+    this.emitters.push({ kind: 'fountain', x: e.x, y: e.y, w: 0, t: 0, dur, rate: 50, acc: 0, colors, power, ang: ang ?? e.ang, spread, life });
+    this.addLight(e.x, e.y, colors[0], 0.3);
+    this.crackleThrottled((e.x / this.W) * 2 - 1);
+  }
+
+  /** short-range comets: a few big trailing stars shot outward from the facade */
+  private lmComets(e: LandmarkEmitter, colors: string[], n = 3, ang?: number, power = 1) {
+    const U = this.U, a0 = ang ?? e.ang;
+    const k = Math.max(1, Math.round(n * this.cascadeBudget()));
+    for (let i = 0; i < k; i++) {
+      const p = this.spawn(); if (!p) return;
+      const a = a0 + rand(-0.16, 0.16), s = rand(210, 290) * U * power;
+      p.x = e.x; p.y = e.y; p.vx = Math.cos(a) * s; p.vy = Math.sin(a) * s;
+      p.drag = 1.5; p.grav = 0.7; p.life = rand(0.75, 1.05); p.size = rand(1.6, 2.0) * U;
+      p.color = pick(colors); p.sprite = dotSprite(p.color);
+      p.trail = 32; p.trailLife = 0.38; p.trailSize = 0.6; p.trailGrav = 0.3;
+    }
+    this.addLight(e.x, e.y, colors[0], 0.35);
+    this.sfx.pop((e.x / this.W) * 2 - 1);
+  }
+
+  /** ledge mine: instant cone of stars thrown up from a ledge */
+  private lmMine(e: LandmarkEmitter, colors: string[], n = 34, power = 1) {
+    const U = this.U;
+    const k = Math.round(n * this.cascadeBudget());
+    const a0 = e.role === 'side' ? (e.ang + -Math.PI / 2) / 2 : e.ang;
+    for (let i = 0; i < k; i++) {
+      const p = this.spawn(); if (!p) break;
+      const a = a0 + rand(-0.42, 0.42), s = rand(120, 250) * U * power;
+      p.x = e.x + rand(-2, 2) * U; p.y = e.y; p.vx = Math.cos(a) * s; p.vy = Math.sin(a) * s;
+      p.drag = 1.7; p.grav = 0.9; p.life = rand(0.6, 1.05); p.size = rand(1.1, 1.5) * U; p.flicker = 0.5;
+      p.color = pick(colors); p.sprite = dotSprite(p.color);
+      if (i % 4 === 0) { p.trail = 14; p.trailLife = 0.25; p.trailSize = 0.5; p.trailGrav = 0.3; }
+    }
+    this.addLight(e.x, e.y - 20 * U, colors[0], 0.5);
+    this.sfx.pop((e.x / this.W) * 2 - 1);
+  }
+
+  /** emitter on the building that a shell aimed at (tx,ty) should leave from: the highest point below it */
+  private lmShellSource(tx: number, ty: number) {
+    const lm = this.lm!;
+    let best: LandmarkEmitter | null = null, bs = 1e9;
+    for (const e of lm.emitters) {
+      if (e.y < ty + 50 * this.U) continue;
+      const s = e.y * 0.5 + Math.abs(e.x - tx) * 0.6 + (e.role === 'top' ? -40 * this.U : 0);
+      if (s < bs) { bs = s; best = e; }
+    }
+    return best;
+  }
+
+  /** aerial shell from the building (spire / top corners), bursts at (tx,ty) after T s */
+  private lmShell(tx: number, ty: number, type: ShellType, T?: number, pal?: string[], scale = 1, burstAt?: number, late = 0) {
+    const { U, W } = this;
+    ty = Math.max(55 * U, Math.min(this.landTop - 70 * U, ty));
+    tx = Math.max(20, Math.min(W - 20, tx));
+    const e = this.lmShellSource(tx, ty);
+    if (!e) return false;
+    const sx = e.x + rand(-1, 1) * U, sy = e.y;
+    const flight = T ?? Math.max(0.45, 0.4 + (Math.hypot(tx - sx, sy - ty) / this.H) * 1.1 + rand(-0.03, 0.06));
+    this.rockets.push({ sx, sy, tx, ty, x: sx, y: sy, t: Math.max(0, late), T: flight, type, pal: pal ?? pick(this.theme.palettes), acc: 0, wob: rand(0, TAU), scale, burstAt });
+    this.addLight(sx, sy, '#fff1c8', 0.25);
+    if (flight - late > 0.25) this.sfx.launch((sx / W) * 2 - 1, flight - late);
+    return true;
+  }
+
+  /** tap / swipe in a landmark scene */
+  private lmTap(x: number, y: number, t: ShellType, sizeMul: number) {
+    const lm = this.lm!, U = this.U;
+    const pal = pick(this.theme.palettes);
+    // nearest emitter on the building (side / ledge)
+    let near: LandmarkEmitter | null = null, nd = 1e9;
+    for (const e of lm.emitters) {
+      if (e.role === 'top') continue;
+      const d = Math.hypot(e.x - x, e.y - y);
+      if (d < nd) { nd = d; near = e; }
+    }
+    const above = y < lm.topY - 12 * U;
+    if (!above && near && nd < 190 * U && y < this.waterY - 8 * U) {
+      // spray toward the tap point (kept on the outward side of the facade)
+      let a = Math.atan2(y - near.y, x - near.x);
+      if (near.side !== 0 && Math.cos(a) * near.side < 0.15) a = near.ang;
+      if (Math.sin(a) > 0.5) a = near.ang; // never straight down into the building
+      const reach = Math.min(1.25, Math.max(0.55, nd / (150 * U)));
+      if (Math.random() < 0.5) this.lmComets(near, pal, 3, a, reach);
+      else { this.lmGerb(near, [pal[0], pal[1] ?? pal[0], '#fff1c2'], 0.9, 0.55 * reach, a, 0.7, 0.14); this.lmComets(near, ['#ffffff'], 1, a, reach); }
+      this.flashBuilding(pal[0], 0.35);
+      return;
+    }
+    if (!this.lmShell(x, y, t, undefined, undefined, sizeMul)) {
+      // nothing on the building below the target: plain ground rocket
+      this.rockets.push({ sx: x, sy: this.waterY - 3 * U, tx: x, ty: y, x, y: this.waterY - 3 * U, t: 0, T: 1, type: t, pal, acc: 0, wob: 0, scale: sizeMul });
+    }
+  }
+
+  /** a quick symmetric pair of sprays from one level of the building */
+  private lmTier(tier: number, colors: string[], mode: 'gerb' | 'comet' | 'mine' = 'gerb', dur = 1.2) {
+    const lm = this.lm; if (!lm) return;
+    for (const e of lm.emitters) {
+      if (e.tier !== tier || e.role === 'top') continue;
+      if (mode === 'mine' || e.role === 'ledge') { if (mode !== 'gerb' || e.role === 'ledge') this.lmMine(e, colors, 26); }
+      else if (mode === 'comet') this.lmComets(e, colors, 2);
+      else this.lmGerb(e, colors, dur);
+    }
+  }
+
+  /** auto-show step in a landmark scene */
+  private autoLandmark() {
+    const lm = this.lm!, W = this.W;
+    const r = Math.random();
+    const pal = pick(this.theme.palettes);
+    if (r < 0.2) {
+      this.lmTier((Math.random() * (lm.tiers - 1)) | 0, [pal[0], '#fff1c2'], 'gerb');
+      this.autoNext = rand(0.7, 1.3);
+    } else if (r < 0.32) {
+      const ls = lm.emitters.filter((e) => e.role === 'ledge');
+      for (let k = 0; k < 2; k++) { const e = pick(ls); this.timed.push({ t: this.time + k * 0.25, fn: () => this.lmMine(e, pal) }); }
+      this.autoNext = rand(0.8, 1.4);
+    } else if (r < 0.42) {
+      const s = Math.random() < 0.5 ? -1 : 1;
+      const es = lm.emitters.filter((e) => e.side === s && e.role === 'side');
+      es.forEach((e, i) => this.timed.push({ t: this.time + i * 0.06, fn: () => this.lmComets(e, pal, 2) }));
+      this.flashBuilding(pal[0], 0.5);
+      this.autoNext = rand(0.8, 1.3);
+    } else {
+      this.lmShell(rand(0.1, 0.9) * W, rand(0.08, 1) * (lm.topY - 10 * this.U), this.randomType());
+      this.autoNext = rand(0.35, 1.0);
+    }
+  }
+
+  /**
+   * 大樓秀: choreographed building show. full ≈ 42 s (menu / auto show), short ≈ 10 s (music finale).
+   * bottom-to-top tier sprays → side-to-side comets → ledge mines rush → building ablaze →
+   * crown of shells around the top (climax) → cascade of sparks pouring off every ledge.
+   */
+  private finaleTower(full: boolean) {
+    const lm = this.lm!;
+    const { U, W, H } = this;
+    const t0 = this.time;
+    const at = (dt: number, fn: () => void) => this.timed.push({ t: t0 + dt, fn });
+    const side = lm.emitters.filter((e) => e.role === 'side');
+    const ledges = lm.emitters.filter((e) => e.role === 'ledge');
+    const gold = ['#ffd27a', '#fff1c2', '#ffb347'], silver = ['#ffffff', '#e8eeff', '#fff6dd'];
+    const pals = this.theme.palettes;
+    const big: ShellType[] = ['chrysanthemum', 'peony', 'senrin', 'pistil'];
+    const top = lm.topY;
+    const sweep = (s0: number, dur: number, cols: string[]) => {
+      for (let i = 0; i < lm.tiers - 1; i++) {
+        const d = s0 + (i / (lm.tiers - 1)) * dur;
+        at(d, () => { this.lmTier(i, cols, 'gerb', 1.1); this.flashBuilding(cols[0], 0.45); });
+      }
+    };
+    const crown = (c: number) => {
+      // ring of shells launched together, bursting around the top just before the climax
+      const R = Math.min(W * 0.42, H * 0.3), n = W > H ? 11 : 9;
+      const cy = Math.max(top - R * 0.15, 60 * U + R * 0.6);
+      const p = pick(pals);
+      for (let k = 0; k < n; k++) {
+        const a = -Math.PI + 0.2 + (k / (n - 1)) * (Math.PI - 0.4);
+        at(c - 1.0, () => this.lmShell(lm.topX + Math.cos(a) * R, cy + Math.sin(a) * R * 0.75, 'peony', 0.9, p, 0.7));
+      }
+      at(c - 0.9, () => this.lmShell(lm.topX, cy - R * 0.2, 'giant', 0.9, ['#fff1c2', '#ffd27a', '#ffffff'], 0.9));
+      at(c, () => { this.flashBuilding('#ffffff', 1.4); this.addLight(lm.topX, top, '#fff1c2', 1.2); });
+      for (let k = 0; k < 4; k++) at(c + 0.15 + k * 0.12, () => this.lmShell(lm.topX + (k - 1.5) * R * 0.35, cy - R * 0.05, 'senrin', 0.6, pick(pals), 0.7));
+    };
+    const cascadeEnd = (c: number, dur: number) => {
+      // sparks pouring outward-down off every side point + willows / kamuro from the top
+      side.forEach((e, i) => at(c + (i % 3) * 0.05, () => this.lmGerb(e, i % 2 ? gold : silver, dur, 0.32, e.side < 0 ? Math.PI - 0.55 : 0.55, 1.4, 0.35)));
+      at(c, () => this.lmShell(lm.topX, Math.max(55 * U, top - H * 0.16), 'kamuro', 0.7, gold, 1.1));
+      at(c + 0.5, () => this.lmShell(lm.topX - W * 0.18, Math.max(55 * U, top - H * 0.1), 'willow', 0.7, gold, 0.9));
+      at(c + 0.7, () => this.lmShell(lm.topX + W * 0.18, Math.max(55 * U, top - H * 0.1), 'willow', 0.7, gold, 0.9));
+      at(c + 1.4, () => this.lmShell(lm.topX, Math.max(55 * U, top - H * 0.2), 'cascade', 0.8, pick(pals), 1));
+      for (let k = 0; k < 6; k++) at(c + k * 0.6, () => this.flashBuilding(k % 2 ? '#ffd27a' : '#ffffff', 0.8));
+    };
+    if (this.auto) this.autoNext = Math.max(this.autoNext, full ? 43 : 11);
+    if (!full) {
+      sweep(0, 2.6, gold);
+      at(2.8, () => side.forEach((e) => this.lmComets(e, silver, 1)));
+      crown(Fireworks.finaleClimax('tower'));
+      cascadeEnd(5.6, 3.2);
+      return;
+    }
+    // 1) opening: spire flash + one big shell, then bottom-to-top tier sprays (0–8 s)
+    at(0, () => { this.flashBuilding('#ffffff', 1); this.lmShell(lm.topX, top - H * 0.12, 'chrysanthemum', 0.9, ['#ffffff', '#fff1c2', '#ffd27a']); });
+    sweep(1.2, 6.2, gold);
+    for (let i = 0; i < lm.tiers - 1; i += 2) at(1.5 + (i / (lm.tiers - 1)) * 6.2, () => this.lmTier(i, silver, 'mine'));
+    // 2) side to side: alternating comet volleys + matching building colour (8.5–16.5 s)
+    for (let r = 0; r < 8; r++) {
+      const s = r % 2 ? 1 : -1, p = pals[r % pals.length];
+      at(8.5 + r * 1.0, () => {
+        side.filter((e) => e.side === s).forEach((e) => this.lmComets(e, p, 2));
+        this.flashBuilding(p[0], 0.8);
+      });
+      if (r % 2) at(9.0 + r * 1.0, () => this.lmShell(rand(0.15, 0.85) * W, rand(0.1, 0.8) * top, pick(big)));
+    }
+    // 3) ledge mines rushing up twice while shells leave the top (17–25 s)
+    for (let loop = 0; loop < 2; loop++)
+      ledges.forEach((e, i) => at(17 + loop * 3.6 + i * (3.2 / ledges.length), () => this.lmMine(e, pick(pals))));
+    for (let k = 0; k < 9; k++) at(17.3 + k * 0.85, () => this.lmShell(rand(0.12, 0.88) * W, rand(0.08, 0.85) * top, this.randomType()));
+    // 4) building ablaze: every level sprays, strobing outline (25.5–32 s)
+    at(25.5, () => side.forEach((e) => this.lmGerb(e, gold, 2.8, 0.6)));
+    at(28.8, () => side.forEach((e) => this.lmGerb(e, silver, 2.8, 0.7)));
+    for (let k = 0; k < 22; k++) at(25.5 + k * 0.28, () => this.flashBuilding(k % 2 ? pick(pals)[0] : '#ffffff', 0.75));
+    for (let k = 0; k < 8; k++) at(26 + k * 0.7, () => this.lmShell(lm.topX + rand(-0.3, 0.3) * W, rand(0.1, 0.7) * top, k % 3 ? 'senrin' : 'crackle'));
+    // 5) crown of shells, climax at 34 s
+    crown(34);
+    // 6) final cascade (35–41 s)
+    cascadeEnd(35, 4.5);
+    at(40.5, () => this.flashBuilding('#fff1c2', 1.2));
+  }
+
   // ---------- show ----------
   setAuto(on: boolean) {
     this.auto = on;
     this.autoNext = 0.2;
+    this.autoTower = 0;
   }
 
   /** run a finale; returns the one actually used (random resolves here) */
-  finale(kind: FinaleKind | 'random' = 'classic'): FinaleKind {
-    const k: FinaleKind = kind === 'random' ? pick<FinaleKind>(['classic', 'nagaoka', 'phoenix']) : kind;
-    if (k === 'nagaoka') this.finaleNagaoka();
+  finale(kind: FinaleKind | 'random' = 'classic', full = true): FinaleKind {
+    let k: FinaleKind = kind === 'random' ? pick<FinaleKind>(this.lm ? ['classic', 'nagaoka', 'phoenix', 'tower', 'tower'] : ['classic', 'nagaoka', 'phoenix']) : kind;
+    if (k === 'tower' && !this.lm) k = 'classic'; // 大樓秀 needs a building
+    if (k === 'tower') this.finaleTower(full);
+    else if (k === 'nagaoka') this.finaleNagaoka();
     else if (k === 'phoenix') this.finalePhoenix();
     else this.finaleClassic();
     return k;
   }
   /** seconds from finale start to its main climax (music sync aligns this to a beat) */
   static finaleClimax(k: FinaleKind) {
-    return k === 'nagaoka' ? 2.0 : k === 'phoenix' ? 0.5 : 7.3;
+    // 'tower': the short (music) version of 大樓秀; the full one peaks at 34 s
+    return k === 'tower' ? 5.0 : k === 'nagaoka' ? 2.0 : k === 'phoenix' ? 0.5 : 7.3;
   }
 
   private finaleClassic() {
@@ -1195,7 +1486,13 @@ export class Fireworks {
     // auto show
     if (this.auto) {
       this.autoNext -= dt;
-      if (this.autoNext <= 0) {
+      if (this.lm) this.autoTower += dt;
+      if (this.autoNext <= 0 && this.lm && this.autoTower > 50) {
+        this.autoTower = 0;
+        this.finale('tower');
+      } else if (this.autoNext <= 0 && this.lm) {
+        this.autoLandmark();
+      } else if (this.autoNext <= 0) {
         const r = Math.random();
         if (r < 0.15) {
           const t = this.randomType();
@@ -1276,9 +1573,10 @@ export class Fireworks {
         while (e.acc >= 1) {
           e.acc--;
           const p = this.spawn(); if (!p) break;
-          const ang = -Math.PI / 2 + rand(-0.17, 0.17), sp = rand(190, 300) * U * e.power;
+          const sd = e.spread ?? 0.17;
+          const ang = (e.ang ?? -Math.PI / 2) + rand(-sd, sd), sp = rand(190, 300) * U * e.power;
           p.x = e.x + rand(-2, 2) * U; p.y = e.y; p.vx = Math.cos(ang) * sp; p.vy = Math.sin(ang) * sp;
-          p.drag = 1.4; p.grav = 1.1; p.life = rand(0.7, 1.3); p.size = rand(1.0, 1.4) * U; p.flicker = 0.7;
+          p.drag = 1.4; p.grav = 1.1; p.life = (e.life ?? 1) * rand(0.7, 1.3); p.size = rand(1.0, 1.4) * U; p.flicker = 0.7;
           p.color = pick(e.colors); p.sprite = dotSprite(p.color);
         }
         if (Math.random() < dt * 1.2) this.addLight(e.x, e.y - 40 * U, e.colors[0], 0.3);
@@ -1320,6 +1618,7 @@ export class Fireworks {
       }
     }
 
+    this.bldFlash.i *= Math.exp(-dt * 3.2);
     // lights
     for (let i = this.lights.length - 1; i >= 0; i--) {
       this.lights[i].i *= Math.exp(-dt * 2.2);
@@ -1385,6 +1684,13 @@ export class Fireworks {
     // smoke
     this.renderSmoke();
 
+    // landmark: the building sits BEHIND the fireworks (they launch from its facade)
+    if (this.lm) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+      ctx.drawImage(this.land, 0, 0);
+    }
     // fx layer: fade (motion blur) then particles
     const fc = this.fxc;
     fc.setTransform(1, 0, 0, 1, 0, 0);
@@ -1435,7 +1741,7 @@ export class Fireworks {
     // land silhouette
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
-    ctx.drawImage(this.land, 0, 0);
+    if (!this.lm) ctx.drawImage(this.land, 0, 0);
 
     if (this.scene !== 'lake') {
       // no water: just the cached ground fill, no snapshot / strip passes

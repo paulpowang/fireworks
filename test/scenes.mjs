@@ -6,7 +6,7 @@ const pw = require('playwright-core');
 const base = process.argv[2] || 'http://127.0.0.1:4173/fireworks/';
 const mode = process.argv[3] || 'all';
 const browser = await pw.chromium.launch({ executablePath: '/opt/google/chrome/chrome' });
-const SC = (process.env.SCENES || 'town,field,lake,sky').split(',').map((id) => [id, { town: '小鎮車站', field: '河岸草地', lake: '湖面倒影', sky: '純夜空' }[id]]);
+const SC = (process.env.SCENES || 'town,field,lake,sky').split(',').map((id) => [id, { town: '小鎮車站', field: '河岸草地', lake: '湖面倒影', sky: '純夜空', tw101: '台北 101', needle: '西雅圖 Space Needle' }[id]]);
 const seed = `(() => { let s = 12345; Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; })();`;
 const out = { shots: [], perf: [], persist: null, errors: [] };
 

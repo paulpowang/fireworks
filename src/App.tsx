@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Fireworks } from './engine/fireworks';
 import { Sfx } from './engine/audio';
 import MusicPanel from './MusicPanel';
-import { FINALES, SCENES, SHELLS, THEMES, type FinaleKind, type SceneId, type ShellType, type ThemeId } from './engine/themes';
+import { FINALES, LANDMARK_SCENES, SCENES, SHELLS, THEMES, type FinaleKind, type SceneId, type ShellType, type ThemeId } from './engine/themes';
 
 type Result = { blob: Blob; url: string; name: string; kind: 'video' | 'image' };
 
@@ -307,7 +307,7 @@ export default function App() {
       </div>
       {finaleMenu && (
         <div className="finmenu" onPointerDown={(e) => e.stopPropagation()}>
-          {FINALES.map((f) => (
+          {FINALES.filter((f) => f.id !== 'tower' || LANDMARK_SCENES.includes(scene)).map((f) => (
             <button
               key={f.id}
               className={'chip' + (finaleKind === f.id ? ' on' : '')}
@@ -360,7 +360,7 @@ export default function App() {
             fw={fwReady}
             sfx={sfxRef.current}
             theme={THEMES.find((t) => t.id === theme) || THEMES[0]}
-            finale={finaleKind}
+            finale={finaleKind === 'tower' && !LANDMARK_SCENES.includes(scene) ? 'classic' : finaleKind}
             onClose={() => setMusicOpen(false)}
             onPlayingChange={(p) => { if (p) setAuto(false); }}
             toast={flash}
